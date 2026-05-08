@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件管理 - {{.config.Title}}</title>
+    <link rel="stylesheet" href="/public/static/zui/css/zui.min.css">
+    <link rel="stylesheet" href="/public/static/EasyImage.css">
+</head>
+<body>
+    <nav class="navbar navbar-default">
+        <div class="container">
+            <div class="navbar-header">
+                <a class="navbar-brand" href="/admin/manager.php">EasyImage 管理后台</a>
+            </div>
+            <ul class="nav navbar-nav navbar-right">
+                <li><a href="/">首页</a></li>
+                <li><a href="/app/list.php">广场</a></li>
+                <li><a href="/admin/chart.php">统计</a></li>
+                <li><a href="/admin/filer.php">文件管理</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="panel panel-default">
+            <div class="panel-heading">
+                <h3 class="panel-title">
+                    <i class="icon icon-folder-open"></i> 文件管理
+                    <span class="badge">{{.path}}</span>
+                </h3>
+            </div>
+            <div class="panel-body">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>文件名</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{if .files}}
+                        {{range .files}}
+                        <tr>
+                            <td>
+                                <i class="icon icon-file-image-o"></i> {{.}}
+                            </td>
+                            <td>
+                                <a href="{{$.config.Domain}}{{$.config.Path}}{{$.path}}{{.}}" target="_blank" class="btn btn-xs btn-primary">
+                                    <i class="icon icon-eye-open"></i> 查看
+                                </a>
+                                <button class="btn btn-xs btn-danger delete-btn" data-url="{{$.config.Path}}{{$.path}}{{.}}">
+                                    <i class="icon icon-trash"></i> 删除
+                                </button>
+                            </td>
+                        </tr>
+                        {{end}}
+                        {{else}}
+                        <tr>
+                            <td colspan="2" class="text-center text-muted">暂无文件</td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="/public/static/zui/lib/jquery/jquery.js"></script>
+    <script src="/public/static/zui/js/zui.min.js"></script>
+    <script>
+        $('.delete-btn').on('click', function() {
+            const url = $(this).data('url');
+            if (confirm('确认删除此文件？')) {
+                $.post('/admin/del.php', {
+                    url: url,
+                    mode: 'delete'
+                }, function(data) {
+                    if (data.code === 200) {
+                        new $.zui.Messager('删除成功', {
+                            type: 'success',
+                            icon: 'ok-sign'
+                        }).show();
+                        setTimeout(() => location.reload(), 1000);
+                    } else {
+                        new $.zui.Messager('删除失败', {
+                            type: 'danger',
+                            icon: 'exclamation-sign'
+                        }).show();
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>

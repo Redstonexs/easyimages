@@ -1,67 +1,77 @@
-    /* 返回顶部 */
-    .btn-back-to-top {
-        padding: 0.5rem 1rem;
-        position: fixed;
-        right: 2rem;
-        bottom: 1rem;
-        z-index: 2;
-        -webkit-transition: -webkit-transform 0.2s ease;
-        transition: transform 0.2s ease;
-        -webkit-transform: translateY(200%);
-        transform: translateY(200%);
-    }
+/* EasyImage Custom Styles */
+body {
+    background: #f5f5f5;
+}
 
-    .btn-back-to-top.scrolled {
-        -webkit-transform: translateY(0);
-        transform: translateY(0);
-    }
+.upload-area {
+    border: 2px dashed #ccc;
+    border-radius: 10px;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: #fff;
+}
 
-    /** 图片列表*/
-    @media screen and (min-width:960px) {
-        .listNum img {
-            width: 258px;
-            height: 258px;
-        }
-    }
+.upload-area:hover {
+    border-color: #3280fc;
+    background: #f0f7ff;
+}
 
-    @media screen and (max-width:960px) {
-        .listNum img {
-            width: 358px;
-            height: 258px;
-        }
-    }
+.upload-area.dragover {
+    border-color: #3280fc;
+    background: #e6f0ff;
+}
 
-    .cards {
-        padding-top: 0px;
-        padding-bottom: 0px;
-        margin-right: 0px;
-        margin-left: 0px;
-    }
+.card {
+    margin-bottom: 20px;
+    background: #fff;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
 
-    .card {
-        box-shadow: rgba(0, 0, 0, 0.45) 0px 25px 20px -20px;
-        border-radius: 5px 5px 5px 5px;
-    }
+.card img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    cursor: pointer;
+}
 
-    img {
-        cursor: pointer;
-        transition: all 0.8s;
-    }
+.bottom-bar {
+    padding: 10px;
+    border-top: 1px solid #eee;
+}
 
-    img:hover {
-        transform: scale(1.5);
-        position: relative;
-        z-index: 100;
-    }
+.bottom-bar a {
+    margin-right: 10px;
+    color: #666;
+}
 
-    .bottom-bar {
-        opacity: 0;
-        width: 100%;
-        position: absolute;
-        bottom: 0.1px;
-        background-color: rgba(0, 0, 0, 0.5);
-    }
+.bottom-bar a:hover {
+    color: #3280fc;
+}
 
-    .bottom-bar:hover {
-        opacity: 1;
-    }
+.link-box {
+    margin: 10px 0;
+    padding: 15px;
+    background: #f9f9f9;
+    border-radius: 5px;
+}
+
+.preview-img {
+    max-width: 200px;
+    max-height: 200px;
+    margin: 10px;
+}
+
+.btn-back-to-top {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: none;
+}
+
+.btn-back-to-top.scrolled {
+    display: block;
+}

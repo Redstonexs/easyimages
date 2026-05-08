@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>错误 - {{.config.Title}}</title>
+    <link rel="stylesheet" href="/public/static/zui/css/zui.min.css">
+</head>
+<body>
+    <div class="container" style="max-width: 600px; margin-top: 100px;">
+        <div class="text-center">
+            <h1><i class="icon icon-exclamation-sign text-danger"></i></h1>
+            <h2>{{.message}}</h2>
+            <p class="text-muted">请检查链接是否正确，或联系管理员</p>
+            <hr>
+            <a href="/" class="btn btn-primary">
+                <i class="icon icon-home"></i> 返回首页
+            </a>
+            <a href="/app/list.php" class="btn btn-default">
+                <i class="icon icon-list"></i> 图床广场
+            </a>
+        </div>
+    </div>
+</body>
+</html>

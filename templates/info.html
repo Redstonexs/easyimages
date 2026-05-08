@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片信息 - {{.config.Title}}</title>
+    <link rel="stylesheet" href="/public/static/zui/css/zui.min.css">
+    <link rel="stylesheet" href="/public/static/EasyImage.css">
+</head>
+<body>
+    <div class="container" style="max-width: 800px; margin-top: 30px;">
+        <div class="panel panel-primary">
+            <div class="panel-heading">
+                <h3 class="panel-title">图片信息</h3>
+            </div>
+            <div class="panel-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <img src="{{.info.url}}" class="img-responsive" alt="{{.info.name}}" style="max-height: 400px;">
+                    </div>
+                    <div class="col-md-6">
+                        <table class="table table-bordered">
+                            <tr>
+                                <td><strong>文件名</strong></td>
+                                <td>{{.info.name}}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>文件大小</strong></td>
+                                <td>{{.info.size}}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>上传时间</strong></td>
+                                <td>{{.info.modTime}}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>图片链接</strong></td>
+                                <td>
+                                    <input type="text" class="form-control" value="{{.info.url}}" readonly>
+                                    <button class="btn btn-primary btn-sm copy-btn" data-clipboard-text="{{.info.url}}" style="margin-top: 5px;">
+                                        <i class="icon icon-copy"></i> 复制
+                                    </button>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="panel-footer">
+                <a href="/" class="btn btn-primary">
+                    <i class="icon icon-upload"></i> 继续上传
+                </a>
+                <a href="/app/list.php" class="btn btn-default">
+                    <i class="icon icon-list"></i> 返回广场
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/public/static/zui/lib/jquery/jquery.js"></script>
+    <script src="/public/static/zui/js/zui.min.js"></script>
+    <script src="/public/static/zui/lib/clipboard/clipboard.min.js"></script>
+    <script>
+        new Clipboard('.copy-btn').on('success', function(e) {
+            new $.zui.Messager('复制成功', {
+                type: 'success',
+                icon: 'ok-sign'
+            }).show();
+        });
+    </script>
+</body>
+</html>

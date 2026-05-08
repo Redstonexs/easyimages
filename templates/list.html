@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图床广场 - {{.config.Title}}</title>
+    <link rel="stylesheet" href="/public/static/zui/css/zui.min.css">
+    <link rel="stylesheet" href="/public/static/EasyImage.css">
+    <link rel="stylesheet" href="/public/static/viewjs/viewer.min.css">
+    <style>
+        .card { margin-bottom: 20px; }
+        .card img { width: 100%; height: 200px; object-fit: cover; cursor: pointer; }
+        .bottom-bar { padding: 10px; }
+        .bottom-bar a { margin-right: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="text-center" style="margin: 20px 0;">
+            <h1>图床广场</h1>
+            <p class="text-muted">今日上传: {{.allUpload}} 张</p>
+        </div>
+
+        <div class="row">
+            <div class="col-md-12">
+                <div class="btn-toolbar">
+                    <div class="btn-group">
+                        <a class="btn btn-primary" href="/app/list.php">今日</a>
+                        <a class="btn btn-default" href="/app/list.php?date={{yesterday}}">昨日</a>
+                        {{range $i := seq .listDate}}
+                        <a class="btn btn-default hidden-xs" href="/app/list.php?date={{minus_days $i}}">{{$i}}天前</a>
+                        {{end}}
+                    </div>
+                    <div class="btn-group">
+                        <a class="btn btn-default" href="?search=jpg">JPG</a>
+                        <a class="btn btn-default" href="?search=png">PNG</a>
+                        <a class="btn btn-default" href="?search=gif">GIF</a>
+                        <a class="btn btn-default" href="?search=webp">WebP</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row" id="gallery">
+            {{if .files}}
+            {{range .files}}
+            <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
+                <div class="card">
+                    <img src="/public/images/loading.svg" 
+                         data-image="{{$.config.Domain}}{{$.config.Path}}{{$.date}}{{.}}" 
+                         data-original="{{$.config.Domain}}{{$.config.Path}}{{$.date}}{{.}}"
+                         alt="{{.}}" loading="lazy">
+                    <div class="bottom-bar">
+                        <a href="{{$.config.Domain}}{{$.config.Path}}{{$.date}}{{.}}" target="_blank">
+                            <i class="icon icon-picture" title="打开"></i>
+                        </a>
+                        <a href="#" class="copy" data-clipboard-text="{{$.config.Domain}}{{$.config.Path}}{{$.date}}{{.}}" title="复制链接">
+                            <i class="icon icon-copy"></i>
+                        </a>
+                        <a href="/app/info.php?img={{$.config.Path}}{{$.date}}{{.}}" target="_blank" title="详细信息">
+                            <i class="icon icon-info-sign"></i>
+                        </a>
+                        <a href="/app/down.php?dw={{$.config.Path}}{{$.date}}{{.}}" target="_blank" title="下载">
+                            <i class="icon icon-cloud-download"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {{end}}
+            {{else}}
+            <div class="col-md-12">
+                <div class="alert alert-info">今天还没有上传的图片哟~~ 快来上传第一张吧~!</div>
+            </div>
+            {{end}}
+        </div>
+
+        <div class="text-center" style="margin: 30px 0;">
+            <a href="/" class="btn btn-primary">
+                <i class="icon icon-upload"></i> 上传图片
+            </a>
+        </div>
+    </div>
+
+    <script src="/public/static/zui/lib/jquery/jquery.js"></script>
+    <script src="/public/static/zui/js/zui.min.js"></script>
+    <script src="/public/static/viewjs/viewer.min.js"></script>
+    <script src="/public/static/lazyload/lazyload.min.js"></script>
+    <script src="/public/static/zui/lib/clipboard/clipboard.min.js"></script>
+    <script>
+        // 图片预览
+        new Viewer(document.getElementById('gallery'), {
+            url: 'data-original'
+        });
+
+        // 复制链接
+        new Clipboard('.copy').on('success', function(e) {
+            new $.zui.Messager('复制成功', {
+                type: 'success',
+                icon: 'ok-sign'
+            }).show();
+        });
+
+        // 懒加载
+        new Lazy({
+            delay: 300
+        });
+    </script>
+</body>
+</html>

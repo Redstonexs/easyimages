@@ -1,0 +1,425 @@
+package service
+
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"easyimage/config"
+
+	"github.com/gin-gonic/gin"
+)
+
+// IsLoggedIn 检查是否已登录
+func IsLoggedIn(c *gin.Context) bool {
+	auth, err := c.Cookie("auth")
+	if err != nil {
+		return false
+	}
+
+	var creds []string
+	if err := json.Unmarshal([]byte(auth), &creds); err != nil {
+		return false
+	}
+
+	if len(creds) < 2 {
+		return false
+	}
+
+	cfg := config.Get()
+	guests, _ := config.LoadGuestConfig()
+
+	// 检查管理员
+	if creds[0] == cfg.User && creds[1] == cfg.Password {
+		return true
+	}
+
+	// 检查上传者
+	if guest, exists := guests[creds[0]]; exists {
+		if guest.Password == creds[1] && guest.Expired > time.Now().Unix() {
+			return true
+		}
+	}
+
+	return false
+}
+
+// IsAdmin 检查是否管理员
+func IsAdmin(c *gin.Context) bool {
+	auth, err := c.Cookie("auth")
+	if err != nil {
+		return false
+	}
+
+	var creds []string
+	if err := json.Unmarshal([]byte(auth), &creds); err != nil {
+		return false
+	}
+
+	if len(creds) < 2 {
+		return false
+	}
+
+	cfg := config.Get()
+	return creds[0] == cfg.User && creds[1] == cfg.Password
+}
+
+// SetAdminSession 设置管理员会话
+func SetAdminSession(c *gin.Context, user string) {
+	cfg := config.Get()
+	creds, _ := json.Marshal([]string{user, cfg.Password})
+	c.SetCookie("auth", string(creds), 3600*24*14, "/", "", false, false)
+}
+
+// HashPassword 密码哈希
+func HashPassword(password string) string {
+	hash := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(hash[:])
+}
+
+// CheckPassword 检查密码
+func CheckPassword(password, hashedPassword string) bool {
+	return HashPassword(password) == hashedPassword
+}
+
+// GenerateFileName 生成文件名
+func GenerateFileName(source string, imgName string) string {
+	switch imgName {
+	case "source":
+		return source
+	case "date":
+		return time.Now().Format("150405")
+	case "unix":
+		return fmt.Sprintf("%d", time.Now().Unix())
+	case "md5":
+		hash := sha256.Sum256([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
+		return hex.EncodeToString(hash[:16])
+	case "uuid":
+		return generateUUID()
+	default:
+		// default: 时间+随机数转36进制
+		randNum, _ := rand.Int(rand.Reader, big.NewInt(9000))
+		return fmt.Sprintf("%s%04d", time.Now().Format("150405"), randNum.Int64()+1000)
+	}
+}
+
+func generateUUID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// EncryptHash 加密路径
+func EncryptHash(data string, password string) string {
+	key := sha256.Sum256([]byte(password))
+	block, err := aes.NewCipher(key[:16])
+	if err != nil {
+		return ""
+	}
+
+	plaintext := []byte(data)
+	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
+	iv := ciphertext[:aes.BlockSize]
+	rand.Read(iv)
+
+	stream := cipher.NewCFBEncrypter(block, iv)
+	stream.XORKeyStream(ciphertext[aes.BlockSize:], plaintext)
+
+	return base64.URLEncoding.EncodeToString(ciphertext)
+}
+
+// DecryptHash 解密路径
+func DecryptHash(encrypted string, password string) (string, error) {
+	key := sha256.Sum256([]byte(password))
+	ciphertext, err := base64.URLEncoding.DecodeString(encrypted)
+	if err != nil {
+		return "", err
+	}
+
+	block, err := aes.NewCipher(key[:16])
+	if err != nil {
+		return "", err
+	}
+
+	if len(ciphertext) < aes.BlockSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+
+	iv := ciphertext[:aes.BlockSize]
+	ciphertext = ciphertext[aes.BlockSize:]
+
+	stream := cipher.NewCFBDecrypter(block, iv)
+	stream.XORKeyStream(ciphertext, ciphertext)
+
+	return string(ciphertext), nil
+}
+
+// EncryptHideKey 加密隐藏路径
+func EncryptHideKey(path string, hideKey string) string {
+	return EncryptHash(path, hideKey)
+}
+
+// DecryptHideKey 解密隐藏路径
+func DecryptHideKey(key string, hideKey string) (string, error) {
+	return DecryptHash(key, hideKey)
+}
+
+// GetFileList 获取文件列表
+func GetFileList(pattern string, sortOrder int) []string {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil
+	}
+
+	var files []string
+	for _, match := range matches {
+		info, err := os.Stat(match)
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() {
+			files = append(files, filepath.Base(match))
+		}
+	}
+
+	if sortOrder == 1 {
+		// 反转排序
+		for i, j := 0, len(files)-1; i < j; i, j = i+1, j-1 {
+			files[i], files[j] = files[j], files[i]
+		}
+	}
+
+	return files
+}
+
+// GetFileCount 获取文件数量
+func GetFileCount(pattern string) int {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return 0
+	}
+
+	count := 0
+	for _, match := range matches {
+		info, err := os.Stat(match)
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() {
+			count++
+		}
+	}
+	return count
+}
+
+// GetDirectorySize 获取目录大小
+func GetDirectorySize(path string) int64 {
+	var size int64
+	filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			size += info.Size()
+		}
+		return nil
+	})
+	return size
+}
+
+// FormatSize 格式化文件大小
+func FormatSize(bytes int64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+	)
+
+	switch {
+	case bytes >= GB:
+		return fmt.Sprintf("%.2fGB", float64(bytes)/float64(GB))
+	case bytes >= MB:
+		return fmt.Sprintf("%.2fMB", float64(bytes)/float64(MB))
+	case bytes >= KB:
+		return fmt.Sprintf("%.2fKB", float64(bytes)/float64(KB))
+	default:
+		return fmt.Sprintf("%dB", bytes)
+	}
+}
+
+// DeleteFile 删除文件
+func DeleteFile(path string) error {
+	cfg := config.Get()
+	fullPath := filepath.Join(".", strings.TrimPrefix(path, cfg.Domain))
+	return os.Remove(fullPath)
+}
+
+// MoveToRecycle 移动到回收站
+func MoveToRecycle(path string, cfg *config.Config) error {
+	// 提取相对路径
+	relPath := strings.TrimPrefix(path, cfg.Domain)
+	relPath = strings.TrimPrefix(relPath, cfg.Path)
+
+	// 构建源路径和目标路径
+	srcPath := filepath.Join(".", cfg.Path, relPath)
+	fileName := strings.ReplaceAll(relPath, "/", "_")
+	dstPath := filepath.Join(".", cfg.Path, "recycle", fileName)
+
+	// 创建回收站目录
+	os.MkdirAll(filepath.Join(".", cfg.Path, "recycle"), 0755)
+
+	return os.Rename(srcPath, dstPath)
+}
+
+// RestoreFromRecycle 从回收站恢复
+func RestoreFromRecycle(name string, cfg *config.Config) error {
+	// 还原路径
+	relPath := strings.ReplaceAll(name, "_", "/")
+	srcPath := filepath.Join(".", cfg.Path, "recycle", name)
+	dstPath := filepath.Join(".", cfg.Path, relPath)
+
+	// 创建目标目录
+	os.MkdirAll(filepath.Dir(dstPath), 0755)
+
+	return os.Rename(srcPath, dstPath)
+}
+
+// DeleteDirectory 删除目录
+func DeleteDirectory(path string) error {
+	return os.RemoveAll(path)
+}
+
+// GetImageInfo 获取图片信息
+func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error) {
+	filePath := filepath.Join(".", img)
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"name":    info.Name(),
+		"path":    img,
+		"size":    FormatSize(info.Size()),
+		"modTime": info.ModTime().Format("2006-01-02 15:04:05"),
+		"url":     cfg.Domain + img,
+	}, nil
+}
+
+// GenerateThumbnail 生成缩略图
+func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
+	// 缓存目录
+	cacheDir := filepath.Join(".", cfg.Path, "cache")
+	os.MkdirAll(cacheDir, 0755)
+
+	// 缩略图文件名
+	relPath := strings.TrimPrefix(img, cfg.Path)
+	thumbName := strings.ReplaceAll(relPath, "/", "_")
+	thumbPath := filepath.Join(cacheDir, thumbName)
+
+	// 检查缓存是否存在
+	if _, err := os.Stat(thumbPath); err == nil {
+		return thumbPath, nil
+	}
+
+	// 这里应该实现实际的缩略图生成逻辑
+	// 暂时返回原图
+	srcPath := filepath.Join(".", img)
+	if _, err := os.Stat(srcPath); err != nil {
+		return "", err
+	}
+
+	// 复制文件作为临时方案
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+
+	dst, err := os.Create(thumbPath)
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close()
+
+	_, err = io.Copy(dst, src)
+	return thumbPath, err
+}
+
+// WriteUploadLog 写入上传日志
+func WriteUploadLog(filePath, sourceName, absolutePath string, fileSize int64, from string) {
+	cfg := config.Get()
+	if cfg.UploadLogs == 0 {
+		return
+	}
+
+	logDir := "admin/logs/upload"
+	os.MkdirAll(logDir, 0755)
+
+	logFile := filepath.Join(logDir, time.Now().Format("2006-01")+".json")
+
+	// 读取现有日志
+	logs := make(map[string]interface{})
+	if data, err := os.ReadFile(logFile); err == nil {
+		json.Unmarshal(data, &logs)
+	}
+
+	// 添加新日志
+	logs[filepath.Base(filePath)] = map[string]interface{}{
+		"source":   sourceName,
+		"date":     time.Now().Format("2006-01-02 15:04:05"),
+		"path":     filePath,
+		"size":     FormatSize(fileSize),
+		"from":     from,
+	}
+
+	// 写入日志
+	data, _ := json.MarshalIndent(logs, "", "  ")
+	os.WriteFile(logFile, data, 0644)
+}
+
+// CheckIPUploadCount 检查IP上传次数
+func CheckIPUploadCount(ip string, limit int) bool {
+	if limit <= 0 {
+		return true
+	}
+
+	logDir := "admin/logs/ipcounts"
+	logFile := filepath.Join(logDir, time.Now().Format("2006-01-02")+".json")
+
+	counts := make(map[string]int)
+	if data, err := os.ReadFile(logFile); err == nil {
+		json.Unmarshal(data, &counts)
+	}
+
+	return counts[ip] < limit
+}
+
+// IncrementIPUploadCount 增加IP上传次数
+func IncrementIPUploadCount(ip string) {
+	logDir := "admin/logs/ipcounts"
+	os.MkdirAll(logDir, 0755)
+
+	logFile := filepath.Join(logDir, time.Now().Format("2006-01-02")+".json")
+
+	counts := make(map[string]int)
+	if data, err := os.ReadFile(logFile); err == nil {
+		json.Unmarshal(data, &counts)
+	}
+
+	counts[ip]++
+
+	data, _ := json.MarshalIndent(counts, "", "  ")
+	os.WriteFile(logFile, data, 0644)
+}

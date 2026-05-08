@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  easyimage:
+    build: .
+    container_name: easyimage
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # 配置文件目录
+      - ./config:/app/config
+      # 图片存储目录
+      - ./i:/app/i
+      # 静态资源目录
+      - ./public:/app/public
+      # 日志目录
+      - ./admin/logs:/app/admin/logs
+      # PHP版本配置目录（用于自动迁移）
+      - ./config/config.php:/app/config/config.php:ro
+      - ./config/config.guest.php:/app/config/config.guest.php:ro
+      - ./config/api_key.php:/app/config/api_key.php:ro
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - easyimage
+
+networks:
+  easyimage:
+    driver: bridge
