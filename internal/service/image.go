@@ -2,12 +2,14 @@ package service
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/jpeg"
 	"image/png"
+	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +21,7 @@ import (
 )
 
 // ProcessUpload 处理上传文件
-func ProcessUpload(c *gin.Context, fileHeader *interface{}, cfg *config.Config, from string) map[string]interface{} {
+func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config.Config, from string) map[string]interface{} {
 	// 这里需要根据实际的multipart.FileHeader类型来处理
 	// 简化版本，实际实现需要更完整的逻辑
 	return map[string]interface{}{

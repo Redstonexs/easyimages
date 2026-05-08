@@ -2,7 +2,6 @@ package main
 
 import (
 	"easyimage/config"
-	"encoding/json"
 	"fmt"
 	"os"
 )

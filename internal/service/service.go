@@ -19,6 +19,8 @@ import (
 	"easyimage/config"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/hkdf"
 )
 
 // IsLoggedIn 检查是否已登录
@@ -82,15 +84,28 @@ func SetAdminSession(c *gin.Context, user string) {
 	c.SetCookie("auth", string(creds), 3600*24*14, "/", "", false, false)
 }
 
-// HashPassword 密码哈希
+// HashPassword 使用bcrypt对密码进行哈希
 func HashPassword(password string) string {
-	hash := sha256.Sum256([]byte(password))
-	return hex.EncodeToString(hash[:])
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		// 如果bcrypt失败，返回空字符串
+		return ""
+	}
+	return string(hash)
 }
 
-// CheckPassword 检查密码
+// CheckPassword 检查密码是否匹配
+// 支持bcrypt和SHA256（向后兼容PHP版本）
 func CheckPassword(password, hashedPassword string) bool {
-	return HashPassword(password) == hashedPassword
+	// 尝试bcrypt验证
+	if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password)); err == nil {
+		return true
+	}
+
+	// 向后兼容：尝试SHA256验证（PHP版本使用的格式）
+	sha256Hash := sha256.Sum256([]byte(password))
+	sha256HashStr := hex.EncodeToString(sha256Hash[:])
+	return sha256HashStr == hashedPassword
 }
 
 // GenerateFileName 生成文件名
@@ -120,10 +135,25 @@ func generateUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
+// deriveKey 使用HKDF从密钥材料派生安全的加密密钥
+func deriveKey(secret []byte, salt []byte) ([]byte, error) {
+	key := make([]byte, 16) // AES-128需要16字节密钥
+	hkdfReader := hkdf.New(sha256.New, secret, salt, []byte("easyimage-encryption-key"))
+	if _, err := io.ReadFull(hkdfReader, key); err != nil {
+		return nil, fmt.Errorf("failed to derive key: %w", err)
+	}
+	return key, nil
+}
+
 // EncryptHash 加密路径
-func EncryptHash(data string, password string) string {
-	key := sha256.Sum256([]byte(password))
-	block, err := aes.NewCipher(key[:16])
+func EncryptHash(data string, secret string) string {
+	salt := []byte("easyimage-url-encrypt")
+	key, err := deriveKey([]byte(secret), salt)
+	if err != nil {
+		return ""
+	}
+
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return ""
 	}
@@ -140,14 +170,19 @@ func EncryptHash(data string, password string) string {
 }
 
 // DecryptHash 解密路径
-func DecryptHash(encrypted string, password string) (string, error) {
-	key := sha256.Sum256([]byte(password))
+func DecryptHash(encrypted string, secret string) (string, error) {
+	salt := []byte("easyimage-url-encrypt")
+	key, err := deriveKey([]byte(secret), salt)
+	if err != nil {
+		return "", err
+	}
+
 	ciphertext, err := base64.URLEncoding.DecodeString(encrypted)
 	if err != nil {
 		return "", err
 	}
 
-	block, err := aes.NewCipher(key[:16])
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
