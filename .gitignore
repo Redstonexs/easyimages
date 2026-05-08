@@ -1,0 +1,42 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+easyimage
+migrate_test
+php2json
+
+# Test
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (generated, not for version control)
+config/config.json
+config/config.guest.json
+config/api_key.json
+config/install.lock
+config/EasyImage.lock
+config/php_backup/
+
+# Logs
+admin/logs/
+
+# Image storage
+i/
+!i/.gitkeep
+
+# Temp
+*.tmp
+*.log

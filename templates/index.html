@@ -37,7 +37,7 @@
         <div class="upload-area" id="uploadArea">
             <i class="icon icon-cloud-upload icon-3x"></i>
             <h3>拖拽文件到此处或点击选择</h3>
-            <p class="text-muted">支持 jpg, png, gif, webp 等格式，单文件最大 {{.config.MaxSize}}MB</p>
+            <p class="text-muted">支持 jpg, png, gif, webp 等格式，单文件最�?{{.config.MaxSize}}MB</p>
             <input type="file" id="fileInput" multiple accept="image/*" style="display: none;">
             <button class="btn btn-primary btn-lg upload-btn" onclick="document.getElementById('fileInput').click()">
                 <i class="icon icon-upload"></i> 选择文件
@@ -65,7 +65,7 @@
         </div>
     </div>
 
-    <script src="/public/static/zui/lib/jquery/jquery.js"></script>
+    <script src="/public/static/zui/lib/jquery/jquery-3.6.4.min.js"></script>
     <script src="/public/static/zui/js/zui.min.js"></script>
     <script src="/public/static/zui/lib/clipboard/clipboard.min.js"></script>
     <script>
@@ -102,8 +102,7 @@
                 formData.append('file', files[i]);
             }
 
-            // 显示上传中
-            new $.zui.Messager('上传中...', {
+            // 显示上传�?            new $.zui.Messager('上传�?..', {
                 type: 'info',
                 icon: 'upload'
             }).show();
@@ -176,8 +175,7 @@
             `;
             resultList.appendChild(div);
 
-            // 初始化复制按钮
-            new Clipboard('.copy-btn').on('success', function(e) {
+            // 初始化复制按�?            new Clipboard('.copy-btn').on('success', function(e) {
                 new $.zui.Messager('复制成功', {
                     type: 'success',
                     icon: 'ok-sign'
@@ -187,3 +185,4 @@
     </script>
 </body>
 </html>
+
