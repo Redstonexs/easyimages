@@ -1025,8 +1025,16 @@ func ImageURLList(cfg *config.Config) gin.HandlerFunc {
 
 		fsPath := "." + reqPath
 
-		// 获取所有图片文件
+		// 获取所有文件并过滤图片
 		allFiles := service.GetFileListRecursive(fsPath)
+		var imageFiles []string
+		for _, name := range allFiles {
+			// 排除webp目录下的文件和非图片文件
+			if !strings.HasPrefix(name, "webp/") && service.IsImageFile(name) {
+				imageFiles = append(imageFiles, name)
+			}
+		}
+		allFiles = imageFiles
 
 		// 计算分页
 		total := len(allFiles)
@@ -1102,7 +1110,15 @@ func ImageURLListAPI(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		fsPath := "." + reqPath
-		allFiles := service.GetFileListRecursive(fsPath)
+		// 获取所有文件并过滤图片
+		rawFiles := service.GetFileListRecursive(fsPath)
+		var allFiles []string
+		for _, name := range rawFiles {
+			// 排除webp目录下的文件和非图片文件
+			if !strings.HasPrefix(name, "webp/") && service.IsImageFile(name) {
+				allFiles = append(allFiles, name)
+			}
+		}
 
 		total := len(allFiles)
 		start := (page - 1) * pageSize

@@ -458,19 +458,38 @@ func CountFilesByExt(dir, ext string) int {
 	return count
 }
 
-// GetFileListRecursive 递归获取目录下所有文件名
+// GetFileListRecursive 递归获取目录下所有文件的相对路径
 func GetFileListRecursive(dir string) []string {
 	var files []string
+	// 确保dir以/结尾
+	if !strings.HasSuffix(dir, "/") {
+		dir += "/"
+	}
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
 		if !info.IsDir() {
-			files = append(files, info.Name())
+			// 返回相对于dir的路径
+			rel, err := filepath.Rel(dir, path)
+			if err == nil {
+				files = append(files, filepath.ToSlash(rel))
+			}
 		}
 		return nil
 	})
 	return files
+}
+
+// IsImageFile 检查文件是否是图片
+func IsImageFile(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	imageExts := map[string]bool{
+		".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
+		".bmp": true, ".webp": true, ".ico": true, ".jfif": true,
+		".tif": true, ".tiff": true, ".tga": true, ".svg": true,
+	}
+	return imageExts[ext]
 }
 
 // validateGlobPattern 验证glob模式字符串安全性
