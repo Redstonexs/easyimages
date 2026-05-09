@@ -21,14 +21,14 @@
     <div class="container">
         <div class="install-box">
             <h2 class="text-center">EasyImage 安装</h2>
-            <p class="text-muted text-center">请配置基本信息完成安�?/p>
+            <p class="text-muted text-center">请配置基本信息完成安装</p>
             <hr>
             <form method="POST" action="/install/">
                 <div class="form-group">
                     <label>站点域名</label>
                     <input type="text" name="domain" class="form-control" required 
                            placeholder="http://your-domain.com" value="{{.config.Domain}}">
-                    <p class="help-block">请填写完整的域名，包�?http:// �?https://</p>
+                    <p class="help-block">请填写完整的域名，包含 http:// 或 https://</p>
                 </div>
                 <div class="form-group">
                     <label>管理员用户名</label>
@@ -36,9 +36,9 @@
                            placeholder="admin" value="{{.config.User}}">
                 </div>
                 <div class="form-group">
-                    <label>管理员密�?/label>
+                    <label>管理员密码</label>
                     <input type="password" name="password" class="form-control" required 
-                           placeholder="请输入密�?>
+                           placeholder="请输入密码">
                     <p class="help-block">请设置一个安全的密码</p>
                 </div>
                 <button type="submit" class="btn btn-primary btn-block btn-lg">
@@ -49,4 +49,3 @@
     </div>
 </body>
 </html>
-
