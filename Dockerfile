@@ -37,28 +37,16 @@ COPY --from=builder /build/easyimage .
 # 复制静态资源
 COPY --from=builder /build/public ./public
 COPY --from=builder /build/config ./config
-COPY --from=builder /build/admin ./admin
 
 # 创建必要目录
-RUN mkdir -p /app/i/cache /app/i/suspic /app/i/recycle
+RUN mkdir -p /app/i/cache /app/i/suspic /app/i/recycle && \
+    mkdir -p /app/admin/logs/upload /app/admin/logs/ipcounts
 
 # 设置权限
 RUN chmod +x /app/easyimage
-
-# 创建自动迁移脚本
-RUN echo '#!/bin/sh' > /app/docker-entrypoint.sh && \
-    echo '' >> /app/docker-entrypoint.sh && \
-    echo '# 检测PHP配置并自动迁移' >> /app/docker-entrypoint.sh && \
-    echo 'if [ -f /app/config/config.php ] && [ ! -f /app/config/config.json ]; then' >> /app/docker-entrypoint.sh && \
-    echo '    echo "检测到PHP版本配置，开始自动迁移..."' >> /app/docker-entrypoint.sh && \
-    echo 'fi' >> /app/docker-entrypoint.sh && \
-    echo '' >> /app/docker-entrypoint.sh && \
-    echo '# 启动应用' >> /app/docker-entrypoint.sh && \
-    echo 'exec /app/easyimage' >> /app/docker-entrypoint.sh && \
-    chmod +x /app/docker-entrypoint.sh
 
 # 暴露端口
 EXPOSE 8080
 
 # 启动命令
-CMD ["/app/docker-entrypoint.sh"]
+CMD ["./easyimage"]

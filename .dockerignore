@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Build artifacts
+*.exe
+*.test
+*.out
+
+# Temporary files
+*.tmp
+*.log
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# PHP backup (not needed in image)
+config/php_backup

@@ -10,9 +10,11 @@
 - `internal/middleware/middleware.go` - 中间件
 - `internal/service/service.go` - 业务逻辑
 - `internal/service/image.go` - 图片处理
+- `internal/service/legacy_password.go` - 旧格式密码验证（向后兼容）
 
 ### Go模块
 - `go.mod` - Go模块文件
+- `go.sum` - Go依赖校验
 
 ## 配置文件
 
@@ -70,7 +72,7 @@
 ## Docker相关
 - `Dockerfile` - Docker构建文件（支持自动迁移）
 - `docker-compose.yml` - Docker Compose配置（支持自动迁移）
-- `docker-entrypoint.sh` - Docker入口脚本（自动迁移）
+- `.dockerignore` - Docker构建忽略规则
 
 ## 迁移工具
 - `cmd/php2json/main.go` - PHP配置转JSON工具
@@ -101,9 +103,10 @@
 F:\easyimage\
 ├── main.go                    # 入口文件
 ├── go.mod                     # Go模块
+├── go.sum                     # Go依赖校验
 ├── Dockerfile                 # Docker构建
 ├── docker-compose.yml         # Docker Compose
-├── docker-entrypoint.sh       # Docker入口脚本
+├── .dockerignore              # Docker构建忽略规则
 ├── .gitignore                 # Git忽略规则
 ├── LICENSE                    # 许可证
 ├── README.md                  # 主说明文档
@@ -124,7 +127,8 @@ F:\easyimage\
 │   │   └── middleware.go      # 中间件
 │   └── service/
 │       ├── service.go         # 业务逻辑
-│       └── image.go           # 图片处理
+│       ├── image.go           # 图片处理
+│       └── legacy_password.go # 旧格式密码验证
 ├── templates/
 │   ├── index.html             # 首页
 │   ├── list.html              # 列表
