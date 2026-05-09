@@ -81,7 +81,10 @@ func IsAdmin(c *gin.Context) bool {
 func SetAdminSession(c *gin.Context, user string) {
 	cfg := config.Get()
 	creds, _ := json.Marshal([]string{user, cfg.Password})
-	c.SetCookie("auth", string(creds), 3600*24*14, "/", "", false, false)
+	// 设置HttpOnly标志，防止客户端脚本访问cookie
+	// secure参数根据域名是否为https来判断
+	secure := strings.HasPrefix(cfg.Domain, "https")
+	c.SetCookie("auth", string(creds), 3600*24*14, "/", "", secure, true)
 }
 
 // HashPassword 使用bcrypt对密码进行哈希
