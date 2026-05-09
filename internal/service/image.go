@@ -10,6 +10,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"log"
 	"mime/multipart"
 	"os"
 	"os/exec"
@@ -354,7 +355,11 @@ func ConvertImage(imgPath, format string) (string, error) {
 
 	if format == "webp" {
 		// WebP 需要使用 cwebp CLI 编码（imaging 库不支持 WebP 编码）
-		cmd := exec.Command("cwebp", "-q", "90", imgPath, "-o", newPath)
+		cwebpPath, err := exec.LookPath("cwebp")
+		if err != nil {
+			return "", fmt.Errorf("cwebp not found, cannot convert to webp: %w", err)
+		}
+		cmd := exec.Command(cwebpPath, "-q", "90", imgPath, "-o", newPath)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return "", fmt.Errorf("webp convert failed: %v (output: %s)", err, string(output))
@@ -549,11 +554,16 @@ func ConvertToWebP(imgPath string, cfg *config.Config) error {
 
 	// 使用 cwebp 命令行工具转换（Go 标准库和 x/image 均无 WebP 编码器）
 	// cwebp -q <quality> input -o output
-	cmd := exec.Command("cwebp", "-q", fmt.Sprintf("%d", quality), imgPath, "-o", webpPath)
+	cwebpPath, lookErr := exec.LookPath("cwebp")
+	if lookErr != nil {
+		// cwebp 未安装，只在首次报错（避免日志洪水）
+		log.Printf("[WebP] cwebp 未安装，跳过 WebP 转换。请安装 libwebp-tools (apk add libwebp-tools)")
+		return fmt.Errorf("cwebp not found: %w", lookErr)
+	}
+	cmd := exec.Command(cwebpPath, "-q", fmt.Sprintf("%d", quality), imgPath, "-o", webpPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// cwebp 未安装或转换失败，记录日志但不中断流程
-		fmt.Printf("[WebP] 转换失败 %s: %v (output: %s)\n", imgPath, err, string(output))
+		log.Printf("[WebP] 转换失败 %s → %s: %v (output: %s)", imgPath, webpPath, err, string(output))
 		return err
 	}
 

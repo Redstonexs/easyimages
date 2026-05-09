@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -41,6 +42,15 @@ func main() {
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Printf("Warning: failed to create directory %s: %v", dir, err)
+		}
+	}
+
+	// 检查 cwebp 是否可用（WebP 转换依赖此 CLI 工具）
+	if cfg.WebpConvert == 1 {
+		if _, err := exec.LookPath("cwebp"); err != nil {
+			log.Printf("WARNING: WebP conversion is enabled but 'cwebp' is not found in PATH. "+
+				"WebP files will NOT be generated. Install libwebp-tools (apk add libwebp-tools) "+
+				"or disable WebP conversion in settings. Error: %v", err)
 		}
 	}
 
