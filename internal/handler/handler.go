@@ -30,12 +30,23 @@ func Index(cfg *config.Config) gin.HandlerFunc {
 // AdminLoginAPI 管理员登录API
 func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 检查登录速率限制
+		clientIP := c.ClientIP()
+		if !service.CheckLoginRateLimit(clientIP) {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"result":  "failed",
+				"message": "登录尝试过于频繁，请5分钟后再试",
+			})
+			return
+		}
+
 		user := c.PostForm("user")
 		password := c.PostForm("password")
 
 		// 验证用户名密码
 		success, message := service.ValidateLogin(user, password, cfg)
 		if success {
+			service.ResetLoginAttempts(clientIP)
 			service.SetAdminSession(c, user)
 			c.JSON(http.StatusOK, gin.H{
 				"result":  "success",
@@ -44,6 +55,7 @@ func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
+		service.RecordFailedLogin(clientIP)
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"result":  "failed",
 			"message": message,
@@ -234,7 +246,11 @@ func APIUpload(cfg *config.Config) gin.HandlerFunc {
 
 func DeleteByHash(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		hash := c.Query("hash")
+		// 支持从查询参数和POST表单获取hash
+		hash := c.PostForm("hash")
+		if hash == "" {
+			hash = c.Query("hash")
+		}
 		if hash == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"code": 400,
@@ -459,6 +475,15 @@ func Install(cfg *config.Config) gin.HandlerFunc {
 
 func InstallAction(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 检查是否已安装（防止安装锁绕过）
+		if _, err := os.Stat("config/install.lock"); err == nil {
+			c.JSON(http.StatusForbidden, gin.H{
+				"result":  "failed",
+				"message": "系统已安装，禁止重复安装",
+			})
+			return
+		}
+
 		// 处理安装
 		domain := c.PostForm("domain")
 		user := c.PostForm("user")
@@ -505,16 +530,28 @@ func AdminIndex(cfg *config.Config) gin.HandlerFunc {
 
 func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 检查登录速率限制
+		clientIP := c.ClientIP()
+		if !service.CheckLoginRateLimit(clientIP) {
+			c.HTML(http.StatusTooManyRequests, "admin_login.html", gin.H{
+				"config": cfg,
+				"error":  "登录尝试过于频繁，请5分钟后再试",
+			})
+			return
+		}
+
 		user := c.PostForm("user")
 		password := c.PostForm("password")
 
 		success, message := service.ValidateLogin(user, password, cfg)
 		if success {
+			service.ResetLoginAttempts(clientIP)
 			service.SetAdminSession(c, user)
 			c.Redirect(http.StatusFound, "/admin/manager")
 			return
 		}
 
+		service.RecordFailedLogin(clientIP)
 		c.HTML(http.StatusOK, "admin_login.html", gin.H{
 			"config":  cfg,
 			"error":   message,
@@ -546,14 +583,56 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 
 		switch action {
 		case "save_config":
-			// 保存配置
-			if err := c.ShouldBind(cfg); err != nil {
+			// 使用白名单方式只更新允许修改的字段，防止覆盖敏感字段
+			var updateCfg config.Config
+			if err := c.ShouldBind(&updateCfg); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"result": "error",
 					"msg":    "配置格式错误",
 				})
 				return
 			}
+
+			// 白名单：只允许更新安全的配置项
+			if updateCfg.Title != "" {
+				cfg.Title = updateCfg.Title
+			}
+			cfg.Keywords = updateCfg.Keywords
+			cfg.Description = updateCfg.Description
+			cfg.Tips = updateCfg.Tips
+			cfg.NoticeStatus = updateCfg.NoticeStatus
+			cfg.Notice = updateCfg.Notice
+			if updateCfg.Domain != "" {
+				cfg.Domain = updateCfg.Domain
+				cfg.ImageURL = updateCfg.Domain
+			}
+			cfg.MustLogin = updateCfg.MustLogin
+			cfg.APIStatus = updateCfg.APIStatus
+			cfg.MaxSize = updateCfg.MaxSize
+			cfg.MaxUploadFiles = updateCfg.MaxUploadFiles
+			cfg.Watermark = updateCfg.Watermark
+			cfg.WaterText = updateCfg.WaterText
+			cfg.WaterPosition = updateCfg.WaterPosition
+			cfg.TextColor = updateCfg.TextColor
+			cfg.TextSize = updateCfg.TextSize
+			cfg.Extensions = updateCfg.Extensions
+			cfg.Compress = updateCfg.Compress
+			cfg.CompressRatio = updateCfg.CompressRatio
+			cfg.Thumbnail = updateCfg.Thumbnail
+			cfg.ThumbnailW = updateCfg.ThumbnailW
+			cfg.ThumbnailH = updateCfg.ThumbnailH
+			cfg.ShowSwitch = updateCfg.ShowSwitch
+			cfg.History = updateCfg.History
+			cfg.ShowSort = updateCfg.ShowSort
+			cfg.ListNumber = updateCfg.ListNumber
+			cfg.ListDate = updateCfg.ListDate
+			cfg.DarkMode = updateCfg.DarkMode
+			cfg.ShowUserHashDel = updateCfg.ShowUserHashDel
+			cfg.ImageRecycle = updateCfg.ImageRecycle
+			cfg.IPUploadCounts = updateCfg.IPUploadCounts
+			cfg.Theme = updateCfg.Theme
+			cfg.Footer = updateCfg.Footer
+			// 注意：不更新 Password, User, Path, Port, HideKey 等敏感字段
 
 			if err := config.Save(cfg); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{
@@ -714,6 +793,18 @@ func Filer(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		reqPath := c.DefaultQuery("path", cfg.Path)
 
+		// 验证路径安全性，防止路径遍历攻击
+		if strings.Contains(reqPath, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			return
+		}
+
+		// 确保路径在允许的目录下
+		if !strings.HasPrefix(reqPath, cfg.Path) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			return
+		}
+
 		// 确保路径以/结尾
 		if !strings.HasSuffix(reqPath, "/") {
 			reqPath += "/"
@@ -729,6 +820,10 @@ func Filer(cfg *config.Config) gin.HandlerFunc {
 			parentPath = filepath.Dir(strings.TrimSuffix(reqPath, "/"))
 			if !strings.HasSuffix(parentPath, "/") {
 				parentPath += "/"
+			}
+			// 确保上级目录不超出允许范围
+			if !strings.HasPrefix(parentPath, cfg.Path) {
+				parentPath = cfg.Path
 			}
 		}
 

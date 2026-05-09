@@ -138,7 +138,7 @@ func main() {
 	r.GET("/app/down", handler.Download(cfg))
 	r.GET("/app/thumb", handler.Thumbnail(cfg))
 	r.GET("/app/hide", handler.HideImage(cfg))
-	r.GET("/app/del", handler.DeleteByHash(cfg))
+	r.POST("/app/del_hash", handler.DeleteByHash(cfg))
 
 	// 登录API
 	r.POST("/api/login", handler.AdminLoginAPI(cfg))

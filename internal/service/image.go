@@ -77,6 +77,18 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 		}
 	}
 
+	// SVG 安全检查：防止 XSS 攻击
+	if ext == "svg" {
+		if !CheckSVGSecurity(filePath) {
+			os.Remove(filePath)
+			return map[string]interface{}{
+				"result":  "failed",
+				"code":    400,
+				"message": "SVG文件包含不安全内容，已拒绝上传",
+			}
+		}
+	}
+
 	// 生成访问URL
 	relativePath := cfg.Path + storagePath + newFileName
 	imageURL := cfg.Domain + relativePath
@@ -88,7 +100,7 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	delURL := ""
 	if cfg.ShowUserHashDel == 1 {
 		delHash := EncryptHash(relativePath, cfg.Password)
-		delURL = cfg.Domain + "/app/del?hash=" + delHash
+		delURL = cfg.Domain + "/app/del_hash?hash=" + delHash
 	}
 
 	// 如果启用了隐藏路径
@@ -438,17 +450,43 @@ func IsAllowedExtension(filename string, cfg *config.Config) bool {
 	return false
 }
 
-// CheckSVGSecurity 检查SVG安全性
+// CheckSVGSecurity 检查SVG安全性，防止XSS攻击
 func CheckSVGSecurity(path string) bool {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
 
-	str := string(content)
-	// 检查是否包含脚本
-	if strings.Contains(str, "<script") || strings.Contains(str, "href=") {
-		return false
+	str := strings.ToLower(string(content))
+
+	// 检查已知的 XSS 向量
+	dangerousPatterns := []string{
+		"<script",      // 脚本标签
+		"javascript:",   // JavaScript URI
+		"vbscript:",     // VBScript URI
+		"data:",         // Data URI（可嵌入任意内容）
+		"<iframe",       // 内嵌框架
+		"<embed",        // 嵌入对象
+		"<object",       // 对象标签
+		"<foreignobject",// SVG foreignObject
+		"onload",        // 事件处理器
+		"onerror",       // 错误事件
+		"onclick",       // 点击事件
+		"onmouseover",   // 鼠标悬停事件
+		"onfocus",       // 焦点事件
+		"onblur",        // 失焦事件
+		"onanimationend",// 动画结束事件
+		"onbegin",       // SVG 动画开始事件
+		"<use",          // SVG use（可引用外部资源）
+		"xlink:href",    // XLink 引用
+		"<set",          // SVG set（可触发事件）
+		"<animate",      // SVG animate
+	}
+
+	for _, pattern := range dangerousPatterns {
+		if strings.Contains(str, pattern) {
+			return false
+		}
 	}
 
 	return true

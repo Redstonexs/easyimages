@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 )
 
@@ -25,8 +26,8 @@ func (h *LegacyPasswordHasher) VerifyHash(password, hashedPassword string) bool 
 	passwordHash := sha256.Sum256([]byte(password))
 	expectedHash := hex.EncodeToString(passwordHash[:])
 
-	// 使用常量时间比较防止时序攻击
-	return subtleCompare(expectedHash, hashedPassword)
+	// 使用标准库常量时间比较防止时序攻击
+	return subtle.ConstantTimeCompare([]byte(expectedHash), []byte(hashedPassword)) == 1
 }
 
 // GetHash 获取旧格式的SHA256哈希值（仅用于迁移）
@@ -35,14 +36,3 @@ func (h *LegacyPasswordHasher) GetHash(password string) string {
 	return hex.EncodeToString(passwordHash[:])
 }
 
-// subtleCompare 使用常量时间比较两个字符串，防止时序攻击
-func subtleCompare(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	result := 0
-	for i := 0; i < len(a); i++ {
-		result |= int(a[i] ^ b[i])
-	}
-	return result == 0
-}

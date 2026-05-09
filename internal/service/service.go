@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"easyimage/config"
@@ -24,68 +26,178 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// IsLoggedIn 检查是否已登录
-func IsLoggedIn(c *gin.Context) bool {
-	auth, err := c.Cookie("auth")
-	if err != nil {
-		return false
+// ==================== Session 管理 ====================
+
+// session 存储结构
+type sessionData struct {
+	User      string
+	IsAdmin   bool
+	CreatedAt time.Time
+}
+
+var (
+	sessionStore sync.Map // map[token]sessionData
+)
+
+const sessionMaxAge = 14 * 24 * time.Hour // 14天过期
+
+// generateSessionToken 生成安全的随机 session token
+func generateSessionToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
 
-	var creds []string
-	if err := json.Unmarshal([]byte(auth), &creds); err != nil {
-		return false
-	}
+// cleanExpiredSessions 清理过期 session（在设置新 session 时触发）
+func cleanExpiredSessions() {
+	now := time.Now()
+	sessionStore.Range(func(key, value interface{}) bool {
+		if s, ok := value.(sessionData); ok {
+			if now.Sub(s.CreatedAt) > sessionMaxAge {
+				sessionStore.Delete(key)
+			}
+		}
+		return true
+	})
+}
 
-	if len(creds) < 2 {
-		return false
-	}
+// ==================== 登录速率限制 ====================
 
-	cfg := config.Get()
-	guests, _ := config.LoadGuestConfig()
+type loginAttempt struct {
+	Count     int
+	FirstTime time.Time
+}
 
-	// 检查管理员
-	if creds[0] == cfg.User && creds[1] == cfg.Password {
+var (
+	loginAttempts   = make(map[string]*loginAttempt)
+	loginAttemptsMu sync.Mutex
+)
+
+const (
+	maxLoginAttempts    = 5             // 最大尝试次数
+	loginLockoutWindow  = 5 * time.Minute // 锁定窗口
+)
+
+// CheckLoginRateLimit 检查登录速率限制，返回 true 表示允许登录
+func CheckLoginRateLimit(ip string) bool {
+	loginAttemptsMu.Lock()
+	defer loginAttemptsMu.Unlock()
+
+	attempt, exists := loginAttempts[ip]
+	if !exists {
 		return true
 	}
 
-	// 检查上传者
-	if guest, exists := guests[creds[0]]; exists {
-		if guest.Password == creds[1] && guest.Expired > time.Now().Unix() {
-			return true
-		}
+	// 超过窗口时间，重置计数
+	if time.Since(attempt.FirstTime) > loginLockoutWindow {
+		delete(loginAttempts, ip)
+		return true
 	}
 
-	return false
+	return attempt.Count < maxLoginAttempts
+}
+
+// RecordFailedLogin 记录登录失败
+func RecordFailedLogin(ip string) {
+	loginAttemptsMu.Lock()
+	defer loginAttemptsMu.Unlock()
+
+	attempt, exists := loginAttempts[ip]
+	if !exists || time.Since(attempt.FirstTime) > loginLockoutWindow {
+		loginAttempts[ip] = &loginAttempt{
+			Count:     1,
+			FirstTime: time.Now(),
+		}
+		return
+	}
+	attempt.Count++
+}
+
+// ResetLoginAttempts 登录成功后重置计数
+func ResetLoginAttempts(ip string) {
+	loginAttemptsMu.Lock()
+	defer loginAttemptsMu.Unlock()
+	delete(loginAttempts, ip)
+}
+
+// IsLoggedIn 检查是否已登录
+func IsLoggedIn(c *gin.Context) bool {
+	token, err := c.Cookie("session")
+	if err != nil || token == "" {
+		return false
+	}
+
+	value, ok := sessionStore.Load(token)
+	if !ok {
+		return false
+	}
+
+	session, ok := value.(sessionData)
+	if !ok {
+		return false
+	}
+
+	// 检查 session 是否过期
+	if time.Since(session.CreatedAt) > sessionMaxAge {
+		sessionStore.Delete(token)
+		return false
+	}
+
+	return true
 }
 
 // IsAdmin 检查是否管理员
 func IsAdmin(c *gin.Context) bool {
-	auth, err := c.Cookie("auth")
-	if err != nil {
+	token, err := c.Cookie("session")
+	if err != nil || token == "" {
 		return false
 	}
 
-	var creds []string
-	if err := json.Unmarshal([]byte(auth), &creds); err != nil {
+	value, ok := sessionStore.Load(token)
+	if !ok {
 		return false
 	}
 
-	if len(creds) < 2 {
+	session, ok := value.(sessionData)
+	if !ok {
 		return false
 	}
 
-	cfg := config.Get()
-	return creds[0] == cfg.User && creds[1] == cfg.Password
+	// 检查 session 是否过期
+	if time.Since(session.CreatedAt) > sessionMaxAge {
+		sessionStore.Delete(token)
+		return false
+	}
+
+	return session.IsAdmin
 }
 
 // SetAdminSession 设置管理员会话
 func SetAdminSession(c *gin.Context, user string) {
 	cfg := config.Get()
-	creds, _ := json.Marshal([]string{user, cfg.Password})
+
+	// 清理过期 session
+	cleanExpiredSessions()
+
+	// 生成安全的随机 token
+	token, err := generateSessionToken()
+	if err != nil {
+		return
+	}
+
+	// 存储 session 数据
+	sessionStore.Store(token, sessionData{
+		User:      user,
+		IsAdmin:   user == cfg.User,
+		CreatedAt: time.Now(),
+	})
+
 	// 设置HttpOnly标志，防止客户端脚本访问cookie
 	// secure参数根据域名是否为https来判断
 	secure := strings.HasPrefix(cfg.Domain, "https")
-	c.SetCookie("auth", string(creds), 3600*24*14, "/", "", secure, true)
+	c.SetCookie("session", token, 3600*24*14, "/", "", secure, true)
 }
 
 // HashPassword 使用bcrypt对密码进行哈希
@@ -116,14 +228,17 @@ func CheckPassword(password, hashedPassword string) bool {
 
 // ValidateLogin 验证登录并返回详细的错误信息
 func ValidateLogin(user, password string, cfg *config.Config) (bool, string) {
-	// 检查用户名
-	if user != cfg.User {
-		return false, "用户名不存在"
-	}
+	// 统一错误消息，防止用户名枚举
+	const failMsg = "用户名或密码错误"
 
-	// 检查密码
-	if !CheckPassword(password, cfg.Password) {
-		return false, "密码错误"
+	// 检查用户名（使用常量时间比较防止时序攻击）
+	userMatch := subtle.ConstantTimeCompare([]byte(user), []byte(cfg.User)) == 1
+
+	// 总是检查密码，防止时序差异泄露用户名是否存在
+	passMatch := CheckPassword(password, cfg.Password)
+
+	if !userMatch || !passMatch {
+		return false, failMsg
 	}
 
 	return true, "登录成功"
@@ -550,44 +665,33 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 	return thumbPath, err
 }
 
-// validatePath 验证路径安全性，防止路径遍历攻击
-func validatePath(path, allowedPrefix string) error {
-	// 清理路径
-	cleaned := filepath.Clean(path)
-
-	// 检查是否包含路径遍历组件
-	if strings.Contains(cleaned, "..") {
-		return fmt.Errorf("invalid path: contains path traversal")
-	}
-
-	// 确保路径在允许的目录下
-	if !strings.HasPrefix(cleaned, allowedPrefix) {
-		return fmt.Errorf("invalid path: outside allowed directory")
-	}
-
-	return nil
-}
-
-// getSafePath 验证路径并返回安全的绝对路径
-// 此函数用于替代直接使用用户输入构建路径
+// getSafePath 验证路径并返回安全的文件系统路径
+// 使用绝对路径比较，防止 Windows 下路径分隔符差异导致的绕过
 func getSafePath(userPath string) (string, error) {
 	cfg := config.Get()
 
-	// 清理路径
-	cleaned := filepath.Clean(userPath)
+	// 构建文件系统路径
+	fsPath := filepath.Join(".", userPath)
 
-	// 检查是否包含路径遍历组件
-	if strings.Contains(cleaned, "..") {
-		return "", fmt.Errorf("invalid path: contains path traversal")
+	// 获取绝对路径
+	absPath, err := filepath.Abs(fsPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path")
 	}
 
-	// 确保路径在允许的目录下
-	if !strings.HasPrefix(cleaned, cfg.Path) {
+	// 获取允许目录的绝对路径
+	allowedDir, err := filepath.Abs(filepath.Join(".", cfg.Path))
+	if err != nil {
+		return "", fmt.Errorf("invalid config path")
+	}
+
+	// 确保绝对路径在允许的目录下（加分隔符防止前缀匹配欺骗）
+	// 例如防止 /i-evil/ 匹配 /i/ 的前缀检查
+	if !strings.HasPrefix(absPath, allowedDir+string(filepath.Separator)) && absPath != allowedDir {
 		return "", fmt.Errorf("invalid path: outside allowed directory")
 	}
 
-	// 返回安全的绝对路径
-	return filepath.Join(".", cleaned), nil
+	return absPath, nil
 }
 
 // sanitizeFilename 清理文件名，移除危险字符
@@ -636,11 +740,17 @@ func WriteUploadLog(filePath, sourceName, absolutePath string, fileSize int64, f
 	os.WriteFile(logFile, data, 0644)
 }
 
+// IP 上传计数互斥锁，防止并发读写竞态条件
+var ipCountMu sync.Mutex
+
 // CheckIPUploadCount 检查IP上传次数
 func CheckIPUploadCount(ip string, limit int) bool {
 	if limit <= 0 {
 		return true
 	}
+
+	ipCountMu.Lock()
+	defer ipCountMu.Unlock()
 
 	logDir := "admin/logs/ipcounts"
 	logFile := filepath.Join(logDir, time.Now().Format("2006-01-02")+".json")
@@ -655,6 +765,9 @@ func CheckIPUploadCount(ip string, limit int) bool {
 
 // IncrementIPUploadCount 增加IP上传次数
 func IncrementIPUploadCount(ip string) {
+	ipCountMu.Lock()
+	defer ipCountMu.Unlock()
+
 	logDir := "admin/logs/ipcounts"
 	os.MkdirAll(logDir, 0755)
 
