@@ -531,15 +531,16 @@ func ConvertToWebP(imgPath string, cfg *config.Config) error {
 	// 生成webp存储路径
 	// 原始路径如: ./i/2026/05/08/xxx.jpg
 	// webp路径如: ./i/webp/2026/05/08/xxx.webp
-	// 不能用 filepath.Rel(".", imgPath)，因为结果会是 "i/2026/05/08/xxx.jpg"（带 i/ 前缀），
-	// 导致 webp 路径变成 ./i/webp/i/2026/05/08/xxx.webp（双层 i/）。
-	fsPrefix := "." + cfg.Path // "./i/"
-	relToStorage := strings.TrimPrefix(imgPath, fsPrefix)
-	if relToStorage == imgPath {
-		return fmt.Errorf("image path %q is not under storage path %q", imgPath, fsPrefix)
+	// 注意: filepath.Join(".", "/i/", ...) 在 Linux 上会产生 "/i/..."（绝对路径，丢失 "." 前缀），
+	// 因此必须用 filepath.Clean 统一后再做 TrimPrefix。
+	cleanImgPath := filepath.Clean(imgPath)
+	cleanPrefix := filepath.Clean("." + cfg.Path) // "./i"
+	if !strings.HasPrefix(cleanImgPath, cleanPrefix+string(filepath.Separator)) {
+		return fmt.Errorf("image path %q is not under storage path %q", imgPath, cleanPrefix)
 	}
+	relToStorage := cleanImgPath[len(cleanPrefix)+1:] // "2026/05/08/xxx.jpg"
 
-	webpDir := filepath.Join(fsPrefix, "webp")
+	webpDir := filepath.Join(cleanPrefix, "webp") // "./i/webp"
 	webpPath := filepath.Join(webpDir, strings.TrimSuffix(relToStorage, filepath.Ext(relToStorage))+".webp")
 
 	// 确保目录存在
