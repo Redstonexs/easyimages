@@ -524,9 +524,12 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 
 func Manager(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 转换为文件系统路径
+		fsPath := "." + cfg.Path
+
 		// 统计信息
-		totalFiles := service.GetFileCount(cfg.Path + "*.*")
-		usedSpace := service.GetDirectorySize(cfg.Path)
+		totalFiles := service.GetFileCountRecursive(fsPath)
+		usedSpace := service.GetDirectorySize(fsPath)
 
 		c.HTML(http.StatusOK, "admin_manager.html", gin.H{
 			"config":      cfg,
@@ -576,16 +579,19 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 
 func Chart(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 转换为文件系统路径
+		fsPath := "." + cfg.Path
+
 		// 统计信息 - 递归统计所有文件
-		totalFiles := service.GetFileCountRecursive(cfg.Path)
-		usedSpace := service.GetDirectorySize(cfg.Path)
+		totalFiles := service.GetFileCountRecursive(fsPath)
+		usedSpace := service.GetDirectorySize(fsPath)
 
 		// 获取最近30天的上传统计
 		dailyStats := make([]gin.H, 0, 30)
 		for i := 0; i < 30; i++ {
 			date := time.Now().AddDate(0, 0, -i)
 			datePath := date.Format("2006/01/02/")
-			count := service.GetFileCount(cfg.Path + datePath + "*.*")
+			count := service.GetFileCount(fsPath + datePath + "*.*")
 			dailyStats = append(dailyStats, gin.H{
 				"Date":  date.Format("01-02"),
 				"Count": count,
@@ -601,7 +607,7 @@ func Chart(cfg *config.Config) gin.HandlerFunc {
 		formatStats := make(map[string]int)
 		extensions := []string{"jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"}
 		for _, ext := range extensions {
-			count := service.CountFilesByExt(cfg.Path, ext)
+			count := service.CountFilesByExt(fsPath, ext)
 			if count > 0 {
 				formatStats[ext] = count
 			}
@@ -635,8 +641,11 @@ func History(cfg *config.Config) gin.HandlerFunc {
 
 		search := c.Query("search")
 
+		// 转换为文件系统路径
+		fsPath := "." + cfg.Path
+
 		// 获取文件列表
-		basePath := cfg.Path + datePath
+		basePath := fsPath + datePath
 		if search != "" {
 			basePath += "*." + search
 		} else {
@@ -644,7 +653,7 @@ func History(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		files := service.GetFileList(basePath, cfg.ShowSort)
-		allUpload := service.GetFileCount(cfg.Path + datePath + "*.*")
+		allUpload := service.GetFileCount(fsPath + datePath + "*.*")
 
 		// 生成日期链接数据
 		yesterday := time.Now().AddDate(0, 0, -1).Format("2006/01/02/")
