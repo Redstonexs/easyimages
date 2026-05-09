@@ -60,10 +60,8 @@ func main() {
 	imgRoutePath := strings.TrimRight(cfg.Path, "/")
 	r.Static(imgRoutePath, "."+cfg.Path)
 
-	// 如果配置了隐藏路径，还需要处理不带 /i/ 前缀的请求
-	if cfg.HidePath == 1 {
-		r.StaticFile("/favicon.ico", "./public/images/favicon.ico")
-	}
+	// favicon
+	r.StaticFile("/favicon.ico", "./public/images/favicon.ico")
 
 	// 页面路由
 	r.GET("/", handler.Index(cfg))
