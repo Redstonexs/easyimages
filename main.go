@@ -4,7 +4,9 @@ import (
 	"easyimage/config"
 	"easyimage/internal/handler"
 	"easyimage/internal/middleware"
+	"easyimage/internal/service"
 	"fmt"
+	"html/template"
 	"log"
 	"os"
 
@@ -41,6 +43,11 @@ func main() {
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+
+	// 注册自定义模板函数
+	r.SetFuncMap(template.FuncMap{
+		"format_size": service.FormatSize,
+	})
 
 	// 加载HTML模板
 	r.LoadHTMLGlob("templates/*")
