@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -47,8 +48,8 @@ func main() {
 	r := gin.Default()
 
 	// 设置multipart表单的最大内存限制
-	// 超过此大小的文件会被写入临时文件，防止大文件上传失败
-	r.MaxMultipartMemory = cfg.MaxSize + 10<<20 // MaxSize + 10MB 缓冲
+	// 设为128MB，让大文件尽量留在内存中避免临时文件I/O开销
+	r.MaxMultipartMemory = 128 << 20 // 128MB
 
 	// 注册自定义模板函数
 	r.SetFuncMap(template.FuncMap{
@@ -180,10 +181,20 @@ func main() {
 	r.GET("/install/", handler.Install(cfg))
 	r.POST("/install/", handler.InstallAction(cfg))
 
-	// 启动服务器
+	// 启动服务器 - 使用自定义 http.Server 以设置超时
+	// 大文件上传场景下，默认无超时或过短超时会导致连接断开
 	addr := fmt.Sprintf(":%d", cfg.Port)
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 30 * time.Second,    // 读取请求头超时
+		ReadTimeout:       5 * time.Minute,     // 读取整个请求体超时（含大文件上传）
+		WriteTimeout:      5 * time.Minute,     // 写入响应超时
+		IdleTimeout:       120 * time.Second,   // 空闲连接超时
+		MaxHeaderBytes:    1 << 20,             // 1MB 最大请求头
+	}
 	log.Printf("EasyImage starting on %s", addr)
-	if err := r.Run(addr); err != nil {
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
