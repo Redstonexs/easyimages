@@ -612,39 +612,20 @@ func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error
 
 // GenerateThumbnail 生成缩略图
 func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
-	// 验证并获取安全路径
-	safeSrcPath, err := getSafePath(img)
+	// 验证并获取安全路径（getSafePath 内部使用 Rel+Join 打断污点链）
+	cleanPath, err := getSafePath(img)
 	if err != nil {
 		return "", err
 	}
 
-	// 获取允许的基目录绝对路径
-	baseDir, err := filepath.Abs(filepath.Join(".", cfg.Path))
-	if err != nil {
-		return "", fmt.Errorf("invalid config path")
-	}
-
-	// 使用 filepath.Rel 打断 CodeQL 污点链：
-	// Rel 计算从 baseDir 到 safeSrcPath 的相对路径，生成全新的非污点字符串
-	relPath, err := filepath.Rel(baseDir, safeSrcPath)
-	if err != nil {
-		return "", fmt.Errorf("invalid path")
-	}
-
-	// 确保相对路径没有逃逸到上级目录
-	if strings.HasPrefix(relPath, "..") || filepath.IsAbs(relPath) {
-		return "", fmt.Errorf("path escapes allowed directory")
-	}
-
-	// 从可信基目录 + 经验证的相对路径重建完整路径（非污点）
-	cleanPath := filepath.Join(baseDir, relPath)
-
 	// 缓存目录
+	baseDir, _ := filepath.Abs(filepath.Join(".", cfg.Path))
 	cacheDir := filepath.Join(baseDir, "cache")
 	os.MkdirAll(cacheDir, 0755)
 
 	// 缩略图文件名 - 使用安全的文件名
-	thumbName := sanitizeFilename(strings.ReplaceAll(relPath, string(filepath.Separator), "_"))
+	relFromBase, _ := filepath.Rel(baseDir, cleanPath)
+	thumbName := sanitizeFilename(strings.ReplaceAll(relFromBase, string(filepath.Separator), "_"))
 	thumbPath := filepath.Join(cacheDir, thumbName)
 
 	// 检查缓存是否存在
@@ -652,7 +633,7 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 		return thumbPath, nil
 	}
 
-	// 打开原始图片（使用从可信基目录重建的路径）
+	// 打开原始图片（cleanPath 由 getSafePath 通过 Rel+Join 重建，非污点值）
 	srcImg, err := imaging.Open(cleanPath)
 	if err != nil {
 		// 如果无法打开（如非图片文件），复制原文件
@@ -681,32 +662,37 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 }
 
 // getSafePath 验证路径并返回安全的文件系统路径
-// 使用绝对路径比较，防止 Windows 下路径分隔符差异导致的绕过
+// 使用 filepath.Rel + filepath.Join 模式打断 CodeQL 污点链：
+// 先验证用户路径在允许目录内，再用 Rel 提取相对路径，最后从可信基目录重建。
 func getSafePath(userPath string) (string, error) {
 	cfg := config.Get()
 
-	// 构建文件系统路径
-	fsPath := filepath.Join(".", userPath)
-
-	// 获取绝对路径
-	absPath, err := filepath.Abs(fsPath)
-	if err != nil {
-		return "", fmt.Errorf("invalid path")
-	}
-
-	// 获取允许目录的绝对路径
+	// 获取允许目录的绝对路径（可信基目录）
 	allowedDir, err := filepath.Abs(filepath.Join(".", cfg.Path))
 	if err != nil {
 		return "", fmt.Errorf("invalid config path")
 	}
 
-	// 确保绝对路径在允许的目录下（加分隔符防止前缀匹配欺骗）
-	// 例如防止 /i-evil/ 匹配 /i/ 的前缀检查
-	if !strings.HasPrefix(absPath, allowedDir+string(filepath.Separator)) && absPath != allowedDir {
+	// 构建用户路径的绝对路径
+	absPath, err := filepath.Abs(filepath.Join(".", userPath))
+	if err != nil {
+		return "", fmt.Errorf("invalid path")
+	}
+
+	// 使用 filepath.Rel 计算相对路径（产生新的非污点值）
+	relPath, err := filepath.Rel(allowedDir, absPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path")
+	}
+
+	// 确保相对路径没有逃逸到上级目录
+	if strings.HasPrefix(relPath, "..") || filepath.IsAbs(relPath) {
 		return "", fmt.Errorf("invalid path: outside allowed directory")
 	}
 
-	return absPath, nil
+	// 从可信基目录 + 经验证的相对路径重建完整路径
+	// 此路径不再携带用户输入的污点标记
+	return filepath.Join(allowedDir, relPath), nil
 }
 
 // sanitizeFilename 清理文件名，移除危险字符
