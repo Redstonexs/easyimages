@@ -202,24 +202,34 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		uploadId := c.PostForm("uploadId")
-		chunkIndexStr := c.PostForm("chunkIndex")
 		totalChunksStr := c.PostForm("totalChunks")
 		filename := c.PostForm("filename")
+		isMerge := c.PostForm("merge") == "true"
 
-		if uploadId == "" || chunkIndexStr == "" || totalChunksStr == "" {
+		if uploadId == "" || totalChunksStr == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "缺少分片参数"})
 			return
 		}
 
-		chunkIndex, err := strconv.Atoi(chunkIndexStr)
-		if err != nil || chunkIndex < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的分片索引"})
-			return
-		}
 		totalChunks, err := strconv.Atoi(totalChunksStr)
 		if err != nil || totalChunks <= 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的分片总数"})
 			return
+		}
+
+		// chunkIndex 仅在非 merge 请求时需要
+		var chunkIndex int
+		if !isMerge {
+			chunkIndexStr := c.PostForm("chunkIndex")
+			if chunkIndexStr == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "缺少分片索引"})
+				return
+			}
+			chunkIndex, err = strconv.Atoi(chunkIndexStr)
+			if err != nil || chunkIndex < 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的分片索引"})
+				return
+			}
 		}
 
 		// 安全校验 uploadId
@@ -230,31 +240,46 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 			}
 		}
 
-		chunk, err := c.FormFile("chunk")
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 204, "message": "没有分片数据"})
-			return
-		}
+		chunk, _ := c.FormFile("chunk")
 
-		// 保存分片
+		// 保存分片（如果有实际文件数据）
 		chunkDir := filepath.Join(".", cfg.Path, "chunks", uploadId)
-		if err := os.MkdirAll(chunkDir, 0755); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建分片目录失败"})
-			return
-		}
-		chunkPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", chunkIndex))
-		if err := c.SaveUploadedFile(chunk, chunkPath); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "保存分片失败"})
-			return
+		if chunk != nil {
+			if err := os.MkdirAll(chunkDir, 0755); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建分片目录失败"})
+				return
+			}
+			chunkPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", chunkIndex))
+			if err := c.SaveUploadedFile(chunk, chunkPath); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "保存分片失败"})
+				return
+			}
 		}
 
-		// 非最后分片，直接返回
-		if chunkIndex < totalChunks-1 {
+		// 并发上传时，最后一个到达的分片不一定是 totalChunks-1。
+		// 不再自动合并，客户端需发送 merge=true 参数显式触发合并。
+		if !isMerge {
+			if chunk == nil {
+				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "缺少分片数据"})
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"result": "success", "code": 200, "message": "分片上传成功", "chunkIndex": chunkIndex})
 			return
 		}
 
-		// === 最后一个分片：合并 ===
+		// === 合并所有分片 ===
+		// 先验证所有分片都已上传完成
+		for i := 0; i < totalChunks; i++ {
+			partPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", i))
+			if _, err := os.Stat(partPath); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"result": "failed", "code": 400,
+					"message": fmt.Sprintf("分片 %d 尚未上传，无法合并", i),
+				})
+				return
+			}
+		}
+
 		if filename == "" {
 			filename = "upload"
 		}

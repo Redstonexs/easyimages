@@ -422,7 +422,16 @@
                 try { navigator.sendBeacon('/app/upload/chunk/cleanup', new FormData([['uploadId', uploadId]])); } catch(e) {}
                 throw err;
             }
-            return lastResult;
+
+            // 所有分片上传完成，发送合并请求
+            const mergeFd = new FormData();
+            mergeFd.append('uploadId', uploadId);
+            mergeFd.append('totalChunks', totalChunks.toString());
+            mergeFd.append('filename', file.name);
+            mergeFd.append('merge', 'true');
+
+            const mergeResult = await sendChunk(mergeFd, () => {});
+            return mergeResult;
         }
 
         function sendChunk(formData, onChunkProgress) {
