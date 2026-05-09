@@ -21,11 +21,97 @@
         }
         .upload-area:hover { border-color: #3280fc; background: #f0f7ff; }
         .upload-area.dragover { border-color: #3280fc; background: #e6f0ff; }
+        .upload-area.uploading { border-color: #f39c12; background: #fefcf3; cursor: default; }
         .upload-btn { margin: 20px 0; }
         .result-area { margin-top: 20px; }
         .link-box { margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 5px; }
         .preview-img { max-width: 200px; max-height: 200px; margin: 10px; }
         .fab-buttons { position: fixed; bottom: 20px; right: 20px; z-index: 100; }
+
+        /* 进度条样式 */
+        .upload-progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+        .upload-progress-container.active {
+            display: block;
+        }
+        .file-progress-item {
+            margin-bottom: 12px;
+            padding: 10px 14px;
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 6px;
+        }
+        .file-progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+        .file-progress-name {
+            font-weight: 500;
+            color: #333;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 60%;
+        }
+        .file-progress-info {
+            color: #999;
+            font-size: 12px;
+        }
+        .progress {
+            margin-bottom: 0;
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+            background: #f0f0f0;
+        }
+        .progress-bar {
+            transition: width 0.15s ease;
+            border-radius: 3px;
+        }
+        .progress-bar-success { background: #06b96f; }
+        .progress-bar-danger { background: #e74c3c; }
+        .overall-progress {
+            margin-top: 16px;
+            padding: 12px 14px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        .overall-progress .progress {
+            height: 10px;
+            border-radius: 5px;
+        }
+        .overall-stats {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #666;
+        }
+        .overall-stats .percentage {
+            font-size: 18px;
+            font-weight: 600;
+            color: #3280fc;
+        }
+        .upload-status-icon {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-uploading { background: #f39c12; animation: pulse 1s infinite; }
+        .status-success { background: #06b96f; }
+        .status-error { background: #e74c3c; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
     </style>
 </head>
 <body>
@@ -38,11 +124,25 @@
         <div class="upload-area" id="uploadArea">
             <i class="icon icon-cloud-upload icon-3x"></i>
             <h3>拖拽文件到此处或点击选择</h3>
-            <p class="text-muted">支持 jpg, png, gif, webp 等格式</p>
+            <p class="text-muted">支持 jpg, png, gif, webp 等格式，单文件最大 <span id="maxSizeDisplay"></span></p>
             <input type="file" id="fileInput" multiple accept="image/*" style="display: none;">
-            <button class="btn btn-primary btn-lg upload-btn" onclick="document.getElementById('fileInput').click()">
+            <button class="btn btn-primary btn-lg upload-btn" id="selectBtn" onclick="document.getElementById('fileInput').click()">
                 <i class="icon icon-upload"></i> 选择文件
             </button>
+        </div>
+
+        <!-- 上传进度区域 -->
+        <div class="upload-progress-container" id="progressContainer">
+            <div id="fileProgressList"></div>
+            <div class="overall-progress" id="overallProgress">
+                <div class="overall-stats">
+                    <span id="overallInfo">准备上传...</span>
+                    <span class="percentage" id="overallPercent">0%</span>
+                </div>
+                <div class="progress">
+                    <div class="progress-bar" id="overallBar" style="width: 0%"></div>
+                </div>
+            </div>
         </div>
 
         <div class="result-area" id="resultArea" style="display: none;">
@@ -116,20 +216,28 @@
     <script src="/public/static/zui/js/zui.min.js"></script>
     <script src="/public/static/zui/lib/clipboard/clipboard.min.js"></script>
     <script>
+        // 配置
+        const MAX_SIZE = {{.config.MaxSize}};
+
+        // 显示最大文件大小
+        function formatSize(bytes) {
+            if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB';
+            if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+            if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return bytes + ' B';
+        }
+        document.getElementById('maxSizeDisplay').textContent = formatSize(MAX_SIZE);
+
         // 登录功能
         $(document).ready(function() {
-            // 显示登录模态框
             $('#adminBtn').click(function() {
                 {{if .isAdmin}}
-                    // 已登录，跳转到管理后台
                     window.location.href = '/admin/manager';
                 {{else}}
-                    // 显示登录模态框
                     $('#loginModal').modal('show');
                 {{end}}
             });
 
-            // 登录按钮点击事件
             $('#loginBtn').click(function() {
                 var user = $('#loginUser').val();
                 var pass = $('#loginPass').val();
@@ -139,33 +247,27 @@
                     return;
                 }
 
-                // 发送登录请求
                 $.ajax({
                     url: '/api/login',
                     type: 'POST',
-                    data: {
-                        user: user,
-                        password: pass
-                    },
+                    data: { user: user, password: pass },
                     success: function(data) {
                         if (data.result === 'success') {
-                            // 登录成功，跳转到管理后台
                             window.location.href = '/admin/manager';
                         } else {
                             $('#loginError').text(data.message || '登录失败').show();
                         }
                     },
-                    error: function() {
-                        $('#loginError').text('登录请求失败').show();
+                    error: function(xhr) {
+                        var msg = '登录请求失败';
+                        try { msg = JSON.parse(xhr.responseText).message || msg; } catch(e) {}
+                        $('#loginError').text(msg).show();
                     }
                 });
             });
 
-            // 回车键提交
             $('#loginPass').keypress(function(e) {
-                if (e.which === 13) {
-                    $('#loginBtn').click();
-                }
+                if (e.which === 13) $('#loginBtn').click();
             });
         });
 
@@ -174,11 +276,19 @@
         const fileInput = document.getElementById('fileInput');
         const resultArea = document.getElementById('resultArea');
         const resultList = document.getElementById('resultList');
+        const progressContainer = document.getElementById('progressContainer');
+        const fileProgressList = document.getElementById('fileProgressList');
+        const overallBar = document.getElementById('overallBar');
+        const overallPercent = document.getElementById('overallPercent');
+        const overallInfo = document.getElementById('overallInfo');
+        const selectBtn = document.getElementById('selectBtn');
+
+        let isUploading = false;
 
         // 拖拽上传
         uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
-            uploadArea.classList.add('dragover');
+            if (!isUploading) uploadArea.classList.add('dragover');
         });
 
         uploadArea.addEventListener('dragleave', () => {
@@ -188,57 +298,196 @@
         uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
             uploadArea.classList.remove('dragover');
-            handleFiles(e.dataTransfer.files);
+            if (!isUploading) handleFiles(e.dataTransfer.files);
         });
 
         fileInput.addEventListener('change', (e) => {
-            handleFiles(e.target.files);
+            if (!isUploading) handleFiles(e.target.files);
         });
 
         function handleFiles(files) {
-            if (files.length === 0) return;
+            if (files.length === 0 || isUploading) return;
 
-            const formData = new FormData();
+            // 客户端文件大小检查
+            const validFiles = [];
             for (let i = 0; i < files.length; i++) {
-                formData.append('file', files[i]);
-            }
-
-            // 显示上传中
-            new $.zui.Messager('上传中...', {
-                type: 'info',
-                icon: 'upload'
-            }).show();
-
-            fetch('/app/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.result === 'success') {
-                    resultArea.style.display = 'block';
-                    if (data.files) {
-                        data.files.forEach(file => addResult(file));
-                    } else {
-                        addResult(data);
-                    }
-                    new $.zui.Messager('上传成功', {
-                        type: 'success',
-                        icon: 'ok-sign'
+                if (files[i].size > MAX_SIZE) {
+                    new $.zui.Messager(`文件 "${files[i].name}" 超过大小限制 (${formatSize(MAX_SIZE)})`, {
+                        type: 'warning', icon: 'exclamation-sign'
                     }).show();
                 } else {
-                    new $.zui.Messager(data.message || '上传失败', {
-                        type: 'danger',
-                        icon: 'exclamation-sign'
+                    validFiles.push(files[i]);
+                }
+            }
+
+            if (validFiles.length === 0) return;
+
+            isUploading = true;
+            uploadArea.classList.add('uploading');
+            selectBtn.disabled = true;
+
+            // 构建 FormData
+            const formData = new FormData();
+            let totalSize = 0;
+            validFiles.forEach(f => {
+                formData.append('file', f);
+                totalSize += f.size;
+            });
+
+            // 显示进度区域
+            fileProgressList.innerHTML = '';
+            progressContainer.classList.add('active');
+
+            // 为每个文件创建进度条
+            validFiles.forEach((f, idx) => {
+                const item = document.createElement('div');
+                item.className = 'file-progress-item';
+                item.id = 'fp-' + idx;
+                item.innerHTML = `
+                    <div class="file-progress-header">
+                        <span class="file-progress-name" title="${escapeHtml(f.name)}">
+                            <span class="upload-status-icon status-uploading"></span>
+                            ${escapeHtml(f.name)}
+                        </span>
+                        <span class="file-progress-info">${formatSize(f.size)}</span>
+                    </div>
+                `;
+                fileProgressList.appendChild(item);
+            });
+
+            // 重置总进度
+            overallBar.style.width = '0%';
+            overallBar.className = 'progress-bar';
+            overallPercent.textContent = '0%';
+            overallInfo.textContent = `正在上传 ${validFiles.length} 个文件 (${formatSize(totalSize)})...`;
+
+            // 使用 XMLHttpRequest 以获取上传进度
+            const xhr = new XMLHttpRequest();
+
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const pct = Math.round((e.loaded / e.total) * 100);
+                    overallBar.style.width = pct + '%';
+                    overallPercent.textContent = pct + '%';
+                    overallInfo.textContent = `正在上传 ${formatSize(e.loaded)} / ${formatSize(e.total)}`;
+                }
+            });
+
+            xhr.addEventListener('load', () => {
+                isUploading = false;
+                uploadArea.classList.remove('uploading');
+                selectBtn.disabled = false;
+
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        // 上传完成 - 更新进度条为成功
+                        overallBar.style.width = '100%';
+                        overallBar.classList.add('progress-bar-success');
+                        overallPercent.textContent = '100%';
+
+                        if (data.result === 'success' || data.code === 200 || data.url) {
+                            resultArea.style.display = 'block';
+                            if (data.files) {
+                                data.files.forEach((file, idx) => {
+                                    updateFileStatus(idx, file.result === 'success' || file.code === 200 || file.url);
+                                    if (file.url) addResult(file);
+                                });
+                                const successCount = data.files.filter(f => f.url).length;
+                                overallInfo.textContent = `上传完成：${successCount}/${validFiles.length} 个成功`;
+                            } else {
+                                updateFileStatus(0, true);
+                                addResult(data);
+                                overallInfo.textContent = '上传完成';
+                            }
+
+                            new $.zui.Messager('上传成功', {
+                                type: 'success', icon: 'ok-sign'
+                            }).show();
+                        } else {
+                            markAllFailed(validFiles.length);
+                            overallBar.classList.remove('progress-bar-success');
+                            overallBar.classList.add('progress-bar-danger');
+                            overallInfo.textContent = '上传失败: ' + (data.message || '未知错误');
+
+                            new $.zui.Messager(data.message || '上传失败', {
+                                type: 'danger', icon: 'exclamation-sign'
+                            }).show();
+                        }
+                    } catch (e) {
+                        markAllFailed(validFiles.length);
+                        overallBar.classList.add('progress-bar-danger');
+                        overallInfo.textContent = '上传失败: 解析响应出错';
+
+                        new $.zui.Messager('上传失败: 响应解析错误', {
+                            type: 'danger', icon: 'exclamation-sign'
+                        }).show();
+                    }
+                } else {
+                    markAllFailed(validFiles.length);
+                    overallBar.classList.add('progress-bar-danger');
+
+                    let errMsg = '上传失败 (HTTP ' + xhr.status + ')';
+                    try { errMsg = JSON.parse(xhr.responseText).message || errMsg; } catch(e) {}
+                    overallInfo.textContent = errMsg;
+
+                    new $.zui.Messager(errMsg, {
+                        type: 'danger', icon: 'exclamation-sign'
                     }).show();
                 }
-            })
-            .catch(error => {
-                new $.zui.Messager('上传失败: ' + error.message, {
-                    type: 'danger',
-                    icon: 'exclamation-sign'
-                }).show();
+
+                // 重置文件选择
+                fileInput.value = '';
             });
+
+            xhr.addEventListener('error', () => {
+                isUploading = false;
+                uploadArea.classList.remove('uploading');
+                selectBtn.disabled = false;
+
+                markAllFailed(validFiles.length);
+                overallBar.classList.add('progress-bar-danger');
+                overallInfo.textContent = '网络错误，上传失败';
+
+                new $.zui.Messager('网络错误，上传失败', {
+                    type: 'danger', icon: 'exclamation-sign'
+                }).show();
+
+                fileInput.value = '';
+            });
+
+            xhr.addEventListener('abort', () => {
+                isUploading = false;
+                uploadArea.classList.remove('uploading');
+                selectBtn.disabled = false;
+                overallInfo.textContent = '上传已取消';
+                fileInput.value = '';
+            });
+
+            xhr.open('POST', '/app/upload');
+            xhr.send(formData);
+        }
+
+        function updateFileStatus(idx, success) {
+            const item = document.getElementById('fp-' + idx);
+            if (!item) return;
+            const icon = item.querySelector('.upload-status-icon');
+            if (icon) {
+                icon.classList.remove('status-uploading');
+                icon.classList.add(success ? 'status-success' : 'status-error');
+            }
+        }
+
+        function markAllFailed(count) {
+            for (let i = 0; i < count; i++) {
+                updateFileStatus(i, false);
+            }
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
         }
 
         function addResult(data) {
@@ -252,26 +501,26 @@
                     <div class="col-md-9">
                         <div class="input-group">
                             <span class="input-group-addon">直链</span>
-                            <input type="text" class="form-control url-input" value="${data.url}" readonly>
+                            <input type="text" class="form-control url-input" value="${escapeHtml(data.url)}" readonly>
                             <span class="input-group-btn">
-                                <button class="btn btn-primary copy-btn" data-clipboard-text="${data.url}">复制</button>
+                                <button class="btn btn-primary copy-btn" data-clipboard-text="${escapeHtml(data.url)}">复制</button>
                             </span>
                         </div>
                         <div class="input-group" style="margin-top: 5px;">
                             <span class="input-group-addon">Markdown</span>
-                            <input type="text" class="form-control url-input" value="![${data.srcName}](${data.url})" readonly>
+                            <input type="text" class="form-control url-input" value="![${escapeHtml(data.srcName || '')}](${escapeHtml(data.url)})" readonly>
                             <span class="input-group-btn">
-                                <button class="btn btn-primary copy-btn" data-clipboard-text="![${data.srcName}](${data.url})">复制</button>
+                                <button class="btn btn-primary copy-btn" data-clipboard-text="![${escapeHtml(data.srcName || '')}](${escapeHtml(data.url)})">复制</button>
                             </span>
                         </div>
                         <div class="input-group" style="margin-top: 5px;">
                             <span class="input-group-addon">HTML</span>
-                            <input type="text" class="form-control url-input" value='<img src="${data.url}" />' readonly>
+                            <input type="text" class="form-control url-input" value='<img src="${escapeHtml(data.url)}" />' readonly>
                             <span class="input-group-btn">
-                                <button class="btn btn-primary copy-btn" data-clipboard-text='<img src="${data.url}" />'>复制</button>
+                                <button class="btn btn-primary copy-btn" data-clipboard-text='<img src="${escapeHtml(data.url)}" />'>复制</button>
                             </span>
                         </div>
-                        ${data.del ? `<a href="${data.del}" class="btn btn-danger btn-sm" style="margin-top: 5px;"><i class="icon icon-trash"></i> 删除</a>` : ''}
+                        ${data.del ? `<a href="${escapeHtml(data.del)}" class="btn btn-danger btn-sm" style="margin-top: 5px;"><i class="icon icon-trash"></i> 删除</a>` : ''}
                     </div>
                 </div>
             `;
@@ -280,8 +529,7 @@
             // 初始化复制按钮
             new Clipboard('.copy-btn').on('success', function(e) {
                 new $.zui.Messager('复制成功', {
-                    type: 'success',
-                    icon: 'ok-sign'
+                    type: 'success', icon: 'ok-sign'
                 }).show();
             });
         }

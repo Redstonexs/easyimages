@@ -46,6 +46,10 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
+	// 设置multipart表单的最大内存限制
+	// 超过此大小的文件会被写入临时文件，防止大文件上传失败
+	r.MaxMultipartMemory = cfg.MaxSize + 10<<20 // MaxSize + 10MB 缓冲
+
 	// 注册自定义模板函数
 	r.SetFuncMap(template.FuncMap{
 		"format_size": service.FormatSize,

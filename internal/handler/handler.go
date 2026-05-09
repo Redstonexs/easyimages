@@ -129,10 +129,14 @@ func Upload(cfg *config.Config) gin.HandlerFunc {
 		// 获取上传文件
 		form, err := c.MultipartForm()
 		if err != nil {
+			errMsg := "没有选择上传的文件"
+			if strings.Contains(err.Error(), "too large") || strings.Contains(err.Error(), "too many bytes") {
+				errMsg = fmt.Sprintf("上传文件过大，单文件限制 %s", service.FormatSize(cfg.MaxSize))
+			}
 			c.JSON(http.StatusBadRequest, gin.H{
 				"result":  "failed",
 				"code":    204,
-				"message": "没有选择上传的文件",
+				"message": errMsg,
 			})
 			return
 		}
