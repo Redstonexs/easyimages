@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -53,6 +54,32 @@ func main() {
 				"or disable WebP conversion in settings. Error: %v", err)
 		}
 	}
+
+	// 定期清理过期的分片目录（浏览器崩溃等异常情况无法触发 cleanup）
+	go func() {
+		chunksDir := "." + cfg.Path + "/chunks"
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			entries, err := os.ReadDir(chunksDir)
+			if err != nil {
+				continue
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				info, err := entry.Info()
+				if err != nil {
+					continue
+				}
+				// 超过1小时的分片目录视为过期
+				if time.Since(info.ModTime()) > time.Hour {
+					os.RemoveAll(filepath.Join(chunksDir, entry.Name()))
+				}
+			}
+		}
+	}()
 
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)
@@ -162,6 +189,7 @@ func main() {
 	// 上传路由
 	r.POST("/app/upload", middleware.CheckLogin(cfg), handler.Upload(cfg))
 	r.POST("/app/upload/chunk", middleware.CheckLogin(cfg), handler.ChunkUpload(cfg))
+	r.POST("/app/upload/chunk/cleanup", middleware.CheckLogin(cfg), handler.ChunkCleanup(cfg))
 
 	// API路由
 	r.POST("/api/index", handler.APIUpload(cfg))

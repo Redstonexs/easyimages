@@ -360,6 +360,29 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
+// ChunkCleanup 清理失败上传的分片目录
+func ChunkCleanup(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		uploadId := c.PostForm("uploadId")
+		if uploadId == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "缺少uploadId"})
+			return
+		}
+
+		// 安全校验 uploadId（与 ChunkUpload 一致）
+		for _, ch := range uploadId {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-') {
+				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的上传ID"})
+				return
+			}
+		}
+
+		chunkDir := filepath.Join(".", cfg.Path, "chunks", uploadId)
+		os.RemoveAll(chunkDir)
+		c.JSON(http.StatusOK, gin.H{"result": "success", "code": 200})
+	}
+}
+
 func APIUpload(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// CORS头

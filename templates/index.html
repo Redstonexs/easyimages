@@ -349,58 +349,79 @@
             });
         }
 
-        // 大文件分片上传（并发）
+        // 大文件分片上传（并发 + 重试）
         async function uploadFileChunked(file, index, onProgress) {
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
             const uploadId = genUploadId();
             const chunkProgress = new Array(totalChunks).fill(0);
-            let completedChunks = 0;
+            let nextChunk = 0;
             let lastResult = null;
-            let firstError = null;
+            let failed = false;
 
             function updateChunkProgress() {
                 const totalUploaded = chunkProgress.reduce((s, v) => s + v, 0);
                 onProgress(totalUploaded);
             }
 
-            // 并发上传所有分片，限制并发数
+            // 并发上传所有分片，限制并发数，每个分片最多重试3次
+            const MAX_RETRIES = 3;
             const workers = [];
             for (let w = 0; w < Math.min(MAX_CONCURRENT_CHUNKS, totalChunks); w++) {
                 workers.push((async () => {
-                    while (true) {
-                        // 从队列取下一个待处理的分片索引
-                        const i = completedChunks;
-                        if (i >= totalChunks || firstError) break;
-                        completedChunks++;
+                    while (!failed) {
+                        const i = nextChunk++;
+                        if (i >= totalChunks) break;
 
                         const start = i * CHUNK_SIZE;
                         const end = Math.min(start + CHUNK_SIZE, file.size);
                         const chunkBlob = file.slice(start, end);
 
-                        const fd = new FormData();
-                        fd.append('chunk', chunkBlob, file.name);
-                        fd.append('uploadId', uploadId);
-                        fd.append('chunkIndex', i.toString());
-                        fd.append('totalChunks', totalChunks.toString());
-                        fd.append('filename', file.name);
+                        let lastErr = null;
+                        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+                            if (failed) break;
+                            if (attempt > 0) {
+                                // 指数退避：500ms, 1s, 2s
+                                await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
+                            }
 
-                        try {
-                            const result = await sendChunk(fd, (loaded) => {
-                                chunkProgress[i] = loaded;
+                            const fd = new FormData();
+                            fd.append('chunk', chunkBlob, file.name);
+                            fd.append('uploadId', uploadId);
+                            fd.append('chunkIndex', i.toString());
+                            fd.append('totalChunks', totalChunks.toString());
+                            fd.append('filename', file.name);
+
+                            try {
+                                const result = await sendChunk(fd, (loaded) => {
+                                    chunkProgress[i] = loaded;
+                                    updateChunkProgress();
+                                });
+                                chunkProgress[i] = end - start;
                                 updateChunkProgress();
-                            });
-                            chunkProgress[i] = end - start;
-                            updateChunkProgress();
-                            if (i === totalChunks - 1) lastResult = result;
-                        } catch (err) {
-                            if (!firstError) firstError = err;
+                                if (i === totalChunks - 1) lastResult = result;
+                                lastErr = null;
+                                break;
+                            } catch (err) {
+                                lastErr = err;
+                                chunkProgress[i] = 0;
+                                updateChunkProgress();
+                            }
+                        }
+                        if (lastErr) {
+                            failed = true;
+                            throw lastErr;
                         }
                     }
                 })());
             }
 
-            await Promise.all(workers);
-            if (firstError) throw firstError;
+            try {
+                await Promise.all(workers);
+            } catch (err) {
+                // 上传失败，通知服务端清理分片
+                try { navigator.sendBeacon('/app/upload/chunk/cleanup', new FormData([['uploadId', uploadId]])); } catch(e) {}
+                throw err;
+            }
             return lastResult;
         }
 
