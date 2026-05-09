@@ -125,9 +125,10 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	go ProcessImageAfterUpload(filePath, cfg)
 
 	// 生成WebP URL（如果配置了WebP转换）
+	// WebP 文件存储在 cfg.Path + "webp/" 下，镜像原始目录结构
 	webpURL := ""
 	if cfg.WebpConvert == 1 {
-		webpRelativePath := cfg.Path + storagePath + fileName + ".webp"
+		webpRelativePath := cfg.Path + "webp/" + storagePath + fileName + ".webp"
 		webpURL = cfg.Domain + webpRelativePath
 		if cfg.HidePath == 1 {
 			webpURL = strings.Replace(webpURL, cfg.Path, "/", 1)
@@ -557,18 +558,25 @@ func ConvertToWebP(imgPath string, cfg *config.Config) error {
 }
 
 // GetWebPURL 获取图片的WebP版本URL
+// WebP 文件存储在 cfg.Path/webp/ 下，镜像原始目录结构。
+// 例如: /i/2026/05/08/xxx.jpg → /i/webp/2026/05/08/xxx.webp
 func GetWebPURL(originalPath string, cfg *config.Config) string {
 	ext := strings.ToLower(filepath.Ext(originalPath))
 	if ext == ".webp" {
 		return cfg.Domain + originalPath
 	}
 
-	webpPath := strings.TrimSuffix(originalPath, filepath.Ext(originalPath)) + ".webp"
-	webpFsPath := filepath.Join(".", webpPath)
+	// WebP 存储在 cfg.Path + "webp/" + 原始相对路径（替换扩展名）
+	// originalPath 如: /i/2026/05/08/xxx.jpg
+	// 期望 webpPath: /i/webp/2026/05/08/xxx.webp
+	relToRoot := strings.TrimPrefix(originalPath, cfg.Path)
+	webpRelPath := "webp/" + strings.TrimSuffix(relToRoot, filepath.Ext(relToRoot)) + ".webp"
+	webpURLPath := cfg.Path + webpRelPath
+	webpFsPath := filepath.Join(".", webpURLPath)
 
 	// 检查webp文件是否存在
 	if _, err := os.Stat(webpFsPath); err == nil {
-		return cfg.Domain + webpPath
+		return cfg.Domain + webpURLPath
 	}
 
 	return ""

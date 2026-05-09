@@ -318,9 +318,19 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 
 		go service.ProcessImageAfterUpload(finalPath, cfg)
 
+		// 生成WebP URL（与 ProcessUpload 保持一致）
+		webpURL := ""
+		if cfg.WebpConvert == 1 {
+			webpRelativePath := cfg.Path + "webp/" + storagePath + newFileName
+			webpURL = cfg.Domain + webpRelativePath
+			if cfg.HidePath == 1 {
+				webpURL = strings.Replace(webpURL, cfg.Path, "/", 1)
+			}
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"result": "success", "code": 200,
-			"url": imageURL, "srcName": baseName, "thumb": thumbURL, "del": delURL,
+			"url": imageURL, "srcName": baseName, "thumb": thumbURL, "del": delURL, "webp_url": webpURL,
 		})
 	}
 }
