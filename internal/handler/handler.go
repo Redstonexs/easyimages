@@ -34,7 +34,8 @@ func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 		password := c.PostForm("password")
 
 		// 验证用户名密码
-		if user == cfg.User && service.CheckPassword(password, cfg.Password) {
+		success, message := service.ValidateLogin(user, password, cfg)
+		if success {
 			service.SetAdminSession(c, user)
 			c.JSON(http.StatusOK, gin.H{
 				"result":  "success",
@@ -45,7 +46,7 @@ func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"result":  "failed",
-			"message": "用户名或密码错误",
+			"message": message,
 		})
 	}
 }
@@ -507,7 +508,8 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 		user := c.PostForm("user")
 		password := c.PostForm("password")
 
-		if user == cfg.User && service.CheckPassword(password, cfg.Password) {
+		success, message := service.ValidateLogin(user, password, cfg)
+		if success {
 			service.SetAdminSession(c, user)
 			c.Redirect(http.StatusFound, "/admin/manager.php")
 			return
@@ -515,7 +517,7 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 
 		c.HTML(http.StatusOK, "admin_login.html", gin.H{
 			"config":  cfg,
-			"error":   "用户名或密码错误",
+			"error":   message,
 		})
 	}
 }

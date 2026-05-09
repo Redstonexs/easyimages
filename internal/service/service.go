@@ -98,17 +98,34 @@ func HashPassword(password string) string {
 }
 
 // CheckPassword 检查密码是否匹配
-// 优先使用bcrypt验证，如果失败则尝试旧格式验证
+// 支持bcrypt和SHA256（向后兼容PHP版本）
 func CheckPassword(password, hashedPassword string) bool {
-	// 优先使用bcrypt验证（安全）
-	if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password)); err == nil {
-		return true
+	// 检查是否是bcrypt格式（以$2a$或$2b$开头）
+	if len(hashedPassword) >= 4 && hashedPassword[0] == '$' && hashedPassword[2] == '$' {
+		// 尝试bcrypt验证
+		if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password)); err == nil {
+			return true
+		}
 	}
 
-	// 旧格式验证：用于兼容从PHP版本迁移的密码
-	// 使用LegacyPasswordHasher进行验证
+	// 旧格式验证：用于兼容从PHP版本迁移的密码（SHA256格式）
 	legacyHasher := NewLegacyPasswordHasher()
 	return legacyHasher.VerifyHash(password, hashedPassword)
+}
+
+// ValidateLogin 验证登录并返回详细的错误信息
+func ValidateLogin(user, password string, cfg *config.Config) (bool, string) {
+	// 检查用户名
+	if user != cfg.User {
+		return false, "用户名不存在"
+	}
+
+	// 检查密码
+	if !CheckPassword(password, cfg.Password) {
+		return false, "密码错误"
+	}
+
+	return true, "登录成功"
 }
 
 // GenerateFileName 生成文件名
