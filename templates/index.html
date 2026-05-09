@@ -25,6 +25,7 @@
         .result-area { margin-top: 20px; }
         .link-box { margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 5px; }
         .preview-img { max-width: 200px; max-height: 200px; margin: 10px; }
+        .fab-buttons { position: fixed; bottom: 20px; right: 20px; z-index: 100; }
     </style>
 </head>
 <body>
@@ -37,7 +38,7 @@
         <div class="upload-area" id="uploadArea">
             <i class="icon icon-cloud-upload icon-3x"></i>
             <h3>拖拽文件到此处或点击选择</h3>
-            <p class="text-muted">支持 jpg, png, gif, webp 等格式，单文件最�?{{.config.MaxSize}}MB</p>
+            <p class="text-muted">支持 jpg, png, gif, webp 等格式，单文件最大 {{.config.MaxSize}}MB</p>
             <input type="file" id="fileInput" multiple accept="image/*" style="display: none;">
             <button class="btn btn-primary btn-lg upload-btn" onclick="document.getElementById('fileInput').click()">
                 <i class="icon icon-upload"></i> 选择文件
@@ -65,10 +66,105 @@
         </div>
     </div>
 
+    <!-- 登录模态框 -->
+    <div class="modal fade" id="loginModal">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal"><span aria-hidden="true">×</span><span class="sr-only">关闭</span></button>
+                    <h4 class="modal-title"><i class="icon icon-sign-in"></i> 管理员登录</h4>
+                </div>
+                <div class="modal-body">
+                    <div id="loginError" class="alert alert-danger" style="display: none;"></div>
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" id="loginUser" class="form-control" placeholder="请输入用户名" required>
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="loginPass" class="form-control" placeholder="请输入密码" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="loginBtn">
+                        <i class="icon icon-ok"></i> 登录
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 悬浮按钮 -->
+    <div class="fab-buttons">
+        <div class="btn-group-vertical">
+            <a href="/app/list.php" class="btn btn-default" title="图床广场">
+                <i class="icon icon-list"></i>
+            </a>
+            <button class="btn btn-primary" id="adminBtn" title="管理员登录">
+                <i class="icon icon-user"></i>
+            </button>
+        </div>
+    </div>
+
     <script src="/public/static/zui/lib/jquery/jquery-3.6.4.min.js"></script>
     <script src="/public/static/zui/js/zui.min.js"></script>
     <script src="/public/static/zui/lib/clipboard/clipboard.min.js"></script>
     <script>
+        // 登录功能
+        $(document).ready(function() {
+            // 显示登录模态框
+            $('#adminBtn').click(function() {
+                {{if .isAdmin}}
+                    // 已登录，跳转到管理后台
+                    window.location.href = '/admin/manager.php';
+                {{else}}
+                    // 显示登录模态框
+                    $('#loginModal').modal('show');
+                {{end}}
+            });
+
+            // 登录按钮点击事件
+            $('#loginBtn').click(function() {
+                var user = $('#loginUser').val();
+                var pass = $('#loginPass').val();
+
+                if (!user || !pass) {
+                    $('#loginError').text('请输入用户名和密码').show();
+                    return;
+                }
+
+                // 发送登录请求
+                $.ajax({
+                    url: '/api/login',
+                    type: 'POST',
+                    data: {
+                        user: user,
+                        password: pass
+                    },
+                    success: function(data) {
+                        if (data.result === 'success') {
+                            // 登录成功，跳转到管理后台
+                            window.location.href = '/admin/manager.php';
+                        } else {
+                            $('#loginError').text(data.message || '登录失败').show();
+                        }
+                    },
+                    error: function() {
+                        $('#loginError').text('登录请求失败').show();
+                    }
+                });
+            });
+
+            // 回车键提交
+            $('#loginPass').keypress(function(e) {
+                if (e.which === 13) {
+                    $('#loginBtn').click();
+                }
+            });
+        });
+
+        // 上传功能
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
         const resultArea = document.getElementById('resultArea');
@@ -102,7 +198,8 @@
                 formData.append('file', files[i]);
             }
 
-            // 显示上传�?            new $.zui.Messager('上传�?..', {
+            // 显示上传中
+            new $.zui.Messager('上传中...', {
                 type: 'info',
                 icon: 'upload'
             }).show();
@@ -175,7 +272,8 @@
             `;
             resultList.appendChild(div);
 
-            // 初始化复制按�?            new Clipboard('.copy-btn').on('success', function(e) {
+            // 初始化复制按钮
+            new Clipboard('.copy-btn').on('success', function(e) {
                 new $.zui.Messager('复制成功', {
                     type: 'success',
                     icon: 'ok-sign'
@@ -185,4 +283,3 @@
     </script>
 </body>
 </html>
-

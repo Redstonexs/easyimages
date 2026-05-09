@@ -15,11 +15,38 @@ import (
 
 func Index(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 检查登录状态
+		isAdmin := service.IsAdmin(c)
+
 		data := gin.H{
 			"config":  cfg,
 			"version": config.Version,
+			"isAdmin": isAdmin,
 		}
 		c.HTML(http.StatusOK, "index.html", data)
+	}
+}
+
+// AdminLoginAPI 管理员登录API
+func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := c.PostForm("user")
+		password := c.PostForm("password")
+
+		// 验证用户名密码
+		if user == cfg.User && service.CheckPassword(password, cfg.Password) {
+			service.SetAdminSession(c, user)
+			c.JSON(http.StatusOK, gin.H{
+				"result":  "success",
+				"message": "登录成功",
+			})
+			return
+		}
+
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"result":  "failed",
+			"message": "用户名或密码错误",
+		})
 	}
 }
 

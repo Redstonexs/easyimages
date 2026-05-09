@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -54,7 +55,15 @@ func main() {
 
 	// 静态文件
 	r.Static("/public", "./public")
-	r.Static(cfg.Path, "."+cfg.Path)
+	// 图片静态文件服务
+	// cfg.Path 通常是 "/i/"，需要注册 "/i" 路由来匹配请求
+	imgRoutePath := strings.TrimRight(cfg.Path, "/")
+	r.Static(imgRoutePath, "."+cfg.Path)
+
+	// 如果配置了隐藏路径，还需要处理不带 /i/ 前缀的请求
+	if cfg.HidePath == 1 {
+		r.StaticFile("/favicon.ico", "./public/images/favicon.ico")
+	}
 
 	// 页面路由
 	r.GET("/", handler.Index(cfg))
@@ -64,6 +73,9 @@ func main() {
 	r.GET("/app/thumb.php", handler.Thumbnail(cfg))
 	r.GET("/app/hide.php", handler.HideImage(cfg))
 	r.GET("/app/del.php", handler.DeleteByHash(cfg))
+
+	// 登录API
+	r.POST("/api/login", handler.AdminLoginAPI(cfg))
 
 	// 上传路由
 	r.POST("/app/upload.php", middleware.CheckLogin(cfg), handler.Upload(cfg))
