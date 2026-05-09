@@ -576,8 +576,8 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 
 func Chart(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 统计信息
-		totalFiles := service.GetFileCount(cfg.Path + "*.*")
+		// 统计信息 - 递归统计所有文件
+		totalFiles := service.GetFileCountRecursive(cfg.Path)
 		usedSpace := service.GetDirectorySize(cfg.Path)
 
 		// 获取最近30天的上传统计
@@ -597,11 +597,11 @@ func Chart(cfg *config.Config) gin.HandlerFunc {
 			dailyStats[i], dailyStats[j] = dailyStats[j], dailyStats[i]
 		}
 
-		// 按格式统计
+		// 按格式统计 - 递归统计
 		formatStats := make(map[string]int)
 		extensions := []string{"jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"}
 		for _, ext := range extensions {
-			count := service.GetFileCount(cfg.Path + "**/*." + ext)
+			count := service.CountFilesByExt(cfg.Path, ext)
 			if count > 0 {
 				formatStats[ext] = count
 			}
@@ -628,6 +628,11 @@ func History(cfg *config.Config) gin.HandlerFunc {
 			datePath = time.Now().Format("2006/01/02/")
 		}
 
+		// 确保日期路径格式正确（末尾加/）
+		if !strings.HasSuffix(datePath, "/") {
+			datePath += "/"
+		}
+
 		search := c.Query("search")
 
 		// 获取文件列表
@@ -639,15 +644,15 @@ func History(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		files := service.GetFileList(basePath, cfg.ShowSort)
-		allUpload := service.GetFileCount(cfg.Path + datePath)
+		allUpload := service.GetFileCount(cfg.Path + datePath + "*.*")
 
 		// 生成日期链接数据
 		yesterday := time.Now().AddDate(0, 0, -1).Format("2006/01/02/")
 		dateLinks := make([]gin.H, 0, listDate)
 		for i := 2; i <= listDate; i++ {
-			date := time.Now().AddDate(0, 0, -i).Format("2006/01/02/")
+			date := time.Now().AddDate(0, 0, -i)
 			dateLinks = append(dateLinks, gin.H{
-				"Date":  date,
+				"Date":  date.Format("2006/01/02/"),
 				"Label": fmt.Sprintf("%d天前", i),
 			})
 		}

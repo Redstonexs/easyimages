@@ -44,17 +44,17 @@
                         <!-- 日期导航 -->
                         <div class="btn-toolbar" style="margin-bottom: 15px;">
                             <div class="btn-group">
-                                <a class="btn btn-primary" href="/admin/history">今日</a>
-                                <a class="btn btn-default" href="/admin/history?date={{.yesterday}}">昨日</a>
+                                <a class="btn {{if eq .date (printf "%s" (now))}}btn-primary{{else}}btn-default{{end}}" href="/admin/history">今日</a>
+                                <a class="btn {{if eq .date .yesterday}}btn-primary{{else}}btn-default{{end}}" href="/admin/history?date={{.yesterday}}">昨日</a>
                                 {{range .dateLinks}}
                                 <a class="btn btn-default hidden-xs" href="/admin/history?date={{.Date}}">{{.Label}}</a>
                                 {{end}}
                             </div>
                             <div class="btn-group">
-                                <a class="btn btn-default btn-sm" href="?search=jpg">JPG</a>
-                                <a class="btn btn-default btn-sm" href="?search=png">PNG</a>
-                                <a class="btn btn-default btn-sm" href="?search=gif">GIF</a>
-                                <a class="btn btn-default btn-sm" href="?search=webp">WebP</a>
+                                <a class="btn {{if eq .search "jpg"}}btn-info{{else}}btn-default{{end}} btn-sm" href="/admin/history?search=jpg">JPG</a>
+                                <a class="btn {{if eq .search "png"}}btn-info{{else}}btn-default{{end}} btn-sm" href="/admin/history?search=png">PNG</a>
+                                <a class="btn {{if eq .search "gif"}}btn-info{{else}}btn-default{{end}} btn-sm" href="/admin/history?search=gif">GIF</a>
+                                <a class="btn {{if eq .search "webp"}}btn-info{{else}}btn-default{{end}} btn-sm" href="/admin/history?search=webp">WebP</a>
                             </div>
                         </div>
 

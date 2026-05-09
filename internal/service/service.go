@@ -313,6 +313,36 @@ func GetFileCount(pattern string) int {
 	return count
 }
 
+// GetFileCountRecursive 递归获取文件数量
+func GetFileCountRecursive(dir string) int {
+	count := 0
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			count++
+		}
+		return nil
+	})
+	return count
+}
+
+// CountFilesByExt 按扩展名统计文件
+func CountFilesByExt(dir, ext string) int {
+	count := 0
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), "."+ext) {
+			count++
+		}
+		return nil
+	})
+	return count
+}
+
 // validateGlobPattern 验证glob模式字符串安全性
 func validateGlobPattern(pattern string) error {
 	// 检查是否包含路径遍历组件

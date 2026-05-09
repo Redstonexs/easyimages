@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -111,6 +112,9 @@ func main() {
 		},
 		"trimSuffix": func(suffix, s string) string {
 			return strings.TrimSuffix(s, suffix)
+		},
+		"now": func() string {
+			return time.Now().Format("2006/01/02/")
 		},
 	})
 
