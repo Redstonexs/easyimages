@@ -157,6 +157,11 @@ func Load() (*Config, error) {
 	configMu.Lock()
 	defer configMu.Unlock()
 
+	// 如果已有配置，直接返回
+	if currentConfig != nil {
+		return currentConfig, nil
+	}
+
 	// 尝试加载JSON配置
 	if _, err := os.Stat("config/config.json"); err == nil {
 		data, err := os.ReadFile("config/config.json")
@@ -173,11 +178,9 @@ func Load() (*Config, error) {
 		return &cfg, nil
 	}
 
-	// 如果没有配置文件，创建默认配置
+	// 如果没有配置文件，返回默认配置（不自动保存）
+	// 配置会在安装完成后保存
 	cfg := getDefaultConfig()
-	if err := Save(cfg); err != nil {
-		return nil, fmt.Errorf("failed to save default config: %w", err)
-	}
 	currentConfig = cfg
 	return cfg, nil
 }

@@ -42,6 +42,9 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
+	// 加载HTML模板
+	r.LoadHTMLGlob("templates/*")
+
 	// 静态文件
 	r.Static("/public", "./public")
 	r.Static(cfg.Path, "."+cfg.Path)
@@ -96,15 +99,15 @@ func main() {
 
 // checkAndMigrate 检测并执行自动迁移
 func checkAndMigrate() error {
-	// 检查是否存在PHP配置
-	if !config.HasPHPConfig() {
+	// 检查是否已有Go配置（非默认配置）
+	if hasValidGoConfig() {
+		log.Println("Valid Go config exists, skipping migration")
 		return nil
 	}
 
-	// 检查是否已有Go配置
-	if _, err := os.Stat("config/config.json"); err == nil {
-		// 已有Go配置，跳过迁移
-		log.Println("Go config already exists, skipping migration")
+	// 检查是否存在PHP配置
+	if !config.HasPHPConfig() {
+		log.Println("No PHP config found, skipping migration")
 		return nil
 	}
 
@@ -133,4 +136,34 @@ func checkAndMigrate() error {
 	log.Println("========================================")
 
 	return nil
+}
+
+// hasValidGoConfig 检查是否存在有效的Go配置（非默认配置）
+func hasValidGoConfig() bool {
+	// 检查配置文件是否存在
+	if _, err := os.Stat("config/config.json"); os.IsNotExist(err) {
+		return false
+	}
+
+	// 加载配置并检查是否已自定义
+	cfg, err := config.Load()
+	if err != nil {
+		return false
+	}
+
+	// 检查是否还是默认配置（域名和密码未修改）
+	defaultDomain := "http://127.0.0.1:8080"
+	defaultPassword := "7676aaafb027c825bd9abab78b234070e702752f625b752e55e55b48e607e358"
+
+	// 如果域名或密码已修改，说明是有效配置
+	if cfg.Domain != defaultDomain || cfg.Password != defaultPassword {
+		return true
+	}
+
+	// 如果有安装锁文件，说明已完成安装
+	if _, err := os.Stat("config/install.lock"); err == nil {
+		return true
+	}
+
+	return false
 }

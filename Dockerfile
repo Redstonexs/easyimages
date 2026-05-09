@@ -15,6 +15,9 @@ RUN go mod download
 # 复制源代码
 COPY . .
 
+# 删除可能存在的默认配置文件（避免干扰迁移检测）
+RUN rm -f config/config.json config/config.guest.json config/api_key.json config/install.lock
+
 # 编译
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o easyimage .
 
@@ -36,7 +39,12 @@ COPY --from=builder /build/easyimage .
 
 # 复制静态资源
 COPY --from=builder /build/public ./public
-COPY --from=builder /build/config ./config
+COPY --from=builder /build/templates ./templates
+
+# 复制PHP配置文件（用于自动迁移）
+COPY --from=builder /build/config/config.php ./config/config.php
+COPY --from=builder /build/config/config.guest.php ./config/config.guest.php
+COPY --from=builder /build/config/api_key.php ./config/api_key.php
 
 # 创建必要目录
 RUN mkdir -p /app/i/cache /app/i/suspic /app/i/recycle && \
