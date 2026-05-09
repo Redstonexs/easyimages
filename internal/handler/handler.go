@@ -1051,11 +1051,11 @@ func ImageURLList(cfg *config.Config) gin.HandlerFunc {
 
 		fsPath := "." + reqPath
 
-		// 获取所有文件并过滤图片
+		// 获取所有文件并过滤图片（GetFileListRecursive 已跳过系统内部目录）
 		allFiles := service.GetFileListRecursive(fsPath)
 		var imageFiles []string
 		for _, name := range allFiles {
-			// 排除webp目录下的文件和非图片文件
+			// 排除webp目录下的重复文件和非图片文件
 			if !strings.HasPrefix(name, "webp/") && service.IsImageFile(name) {
 				imageFiles = append(imageFiles, name)
 			}
@@ -1136,11 +1136,11 @@ func ImageURLListAPI(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		fsPath := "." + reqPath
-		// 获取所有文件并过滤图片
+		// 获取所有文件并过滤图片（GetFileListRecursive 已跳过系统内部目录）
 		rawFiles := service.GetFileListRecursive(fsPath)
 		var allFiles []string
 		for _, name := range rawFiles {
-			// 排除webp目录下的文件和非图片文件
+			// 排除webp目录下的重复文件和非图片文件
 			if !strings.HasPrefix(name, "webp/") && service.IsImageFile(name) {
 				allFiles = append(allFiles, name)
 			}

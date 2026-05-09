@@ -384,7 +384,29 @@ func GetFileList(pattern string, sortOrder int) []string {
 	return files
 }
 
-// GetDirList 获取目录列表
+// internalDirs 系统内部目录集合，不应出现在文件浏览和 URL 列表中。
+// 这些目录由系统自动管理（缩略图缓存、回收站、上传分片等），非用户上传内容。
+var internalDirs = map[string]bool{
+	"cache":   true,
+	"suspic":  true,
+	"recycle": true,
+	"chunks":  true,
+	"admin":   true,
+}
+
+// isInternalPath 检查路径的顶层目录是否为系统内部目录。
+// 例如 "cache/thumb_xxx" → true, "2026/05/08/file.jpg" → false
+func isInternalPath(relPath string) bool {
+	if internalDirs[relPath] {
+		return true
+	}
+	if i := strings.Index(relPath, "/"); i > 0 {
+		return internalDirs[relPath[:i]]
+	}
+	return false
+}
+
+// GetDirList 获取目录列表（排除系统内部目录）
 func GetDirList(dirPath string) []string {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
@@ -393,7 +415,7 @@ func GetDirList(dirPath string) []string {
 
 	var dirs []string
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() && !internalDirs[entry.Name()] {
 			dirs = append(dirs, entry.Name()+"/")
 		}
 	}
@@ -453,7 +475,7 @@ func CountFilesByExt(dir, ext string) int {
 	return count
 }
 
-// GetFileListRecursive 递归获取目录下所有文件的相对路径
+// GetFileListRecursive 递归获取目录下所有文件的相对路径（跳过系统内部目录）
 func GetFileListRecursive(dir string) []string {
 	var files []string
 	// 确保dir以/结尾
@@ -462,6 +484,14 @@ func GetFileListRecursive(dir string) []string {
 	}
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			return nil
+		}
+		// 跳过系统内部目录（cache、suspic、recycle、chunks、admin）
+		if info.IsDir() && path != dir {
+			rel, err := filepath.Rel(dir, path)
+			if err == nil && isInternalPath(filepath.ToSlash(rel)) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !info.IsDir() {
