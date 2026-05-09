@@ -747,47 +747,114 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 				return
 			}
 
-			// 白名单：只允许更新安全的配置项
-			if updateCfg.Title != "" {
+			// 白名单：只更新表单中实际提交的字段，避免未提交的字段被零值覆盖。
+			// c.GetPostForm 检查字段是否存在于 POST body 中。
+			if _, exists := c.GetPostForm("title"); exists && updateCfg.Title != "" {
 				cfg.Title = updateCfg.Title
 			}
-			cfg.Keywords = updateCfg.Keywords
-			cfg.Description = updateCfg.Description
-			cfg.Tips = updateCfg.Tips
-			cfg.NoticeStatus = updateCfg.NoticeStatus
-			cfg.Notice = updateCfg.Notice
-			if updateCfg.Domain != "" {
+			if _, exists := c.GetPostForm("keywords"); exists {
+				cfg.Keywords = updateCfg.Keywords
+			}
+			if _, exists := c.GetPostForm("description"); exists {
+				cfg.Description = updateCfg.Description
+			}
+			if _, exists := c.GetPostForm("tips"); exists {
+				cfg.Tips = updateCfg.Tips
+			}
+			if _, exists := c.GetPostForm("notice_status"); exists {
+				cfg.NoticeStatus = updateCfg.NoticeStatus
+			}
+			if _, exists := c.GetPostForm("notice"); exists {
+				cfg.Notice = updateCfg.Notice
+			}
+			if _, exists := c.GetPostForm("domain"); exists && updateCfg.Domain != "" {
 				cfg.Domain = updateCfg.Domain
 				cfg.ImageURL = updateCfg.Domain
 			}
-			cfg.MustLogin = updateCfg.MustLogin
-			cfg.APIStatus = updateCfg.APIStatus
-			cfg.MaxSize = updateCfg.MaxSize
-			cfg.MaxUploadFiles = updateCfg.MaxUploadFiles
-			cfg.Watermark = updateCfg.Watermark
-			cfg.WaterText = updateCfg.WaterText
-			cfg.WaterPosition = updateCfg.WaterPosition
-			cfg.TextColor = updateCfg.TextColor
-			cfg.TextSize = updateCfg.TextSize
-			cfg.Extensions = updateCfg.Extensions
-			cfg.Compress = updateCfg.Compress
-			cfg.CompressRatio = updateCfg.CompressRatio
-			cfg.Thumbnail = updateCfg.Thumbnail
-			cfg.ThumbnailW = updateCfg.ThumbnailW
-			cfg.ThumbnailH = updateCfg.ThumbnailH
-			cfg.WebpConvert = updateCfg.WebpConvert
-			cfg.WebpQuality = updateCfg.WebpQuality
-			cfg.ShowSwitch = updateCfg.ShowSwitch
-			cfg.History = updateCfg.History
-			cfg.ShowSort = updateCfg.ShowSort
-			cfg.ListNumber = updateCfg.ListNumber
-			cfg.ListDate = updateCfg.ListDate
-			cfg.DarkMode = updateCfg.DarkMode
-			cfg.ShowUserHashDel = updateCfg.ShowUserHashDel
-			cfg.ImageRecycle = updateCfg.ImageRecycle
-			cfg.IPUploadCounts = updateCfg.IPUploadCounts
-			cfg.Theme = updateCfg.Theme
-			cfg.Footer = updateCfg.Footer
+			if _, exists := c.GetPostForm("mustLogin"); exists {
+				cfg.MustLogin = updateCfg.MustLogin
+			}
+			if _, exists := c.GetPostForm("apiStatus"); exists {
+				cfg.APIStatus = updateCfg.APIStatus
+			}
+			if _, exists := c.GetPostForm("maxSize"); exists && updateCfg.MaxSize > 0 {
+				cfg.MaxSize = updateCfg.MaxSize
+			}
+			if _, exists := c.GetPostForm("maxUploadFiles"); exists && updateCfg.MaxUploadFiles > 0 {
+				cfg.MaxUploadFiles = updateCfg.MaxUploadFiles
+			}
+			if _, exists := c.GetPostForm("watermark"); exists {
+				cfg.Watermark = updateCfg.Watermark
+			}
+			if _, exists := c.GetPostForm("waterText"); exists {
+				cfg.WaterText = updateCfg.WaterText
+			}
+			if _, exists := c.GetPostForm("waterPosition"); exists {
+				cfg.WaterPosition = updateCfg.WaterPosition
+			}
+			if _, exists := c.GetPostForm("textColor"); exists {
+				cfg.TextColor = updateCfg.TextColor
+			}
+			if _, exists := c.GetPostForm("textSize"); exists {
+				cfg.TextSize = updateCfg.TextSize
+			}
+			if _, exists := c.GetPostForm("extensions"); exists {
+				cfg.Extensions = updateCfg.Extensions
+			}
+			if _, exists := c.GetPostForm("compress"); exists {
+				cfg.Compress = updateCfg.Compress
+			}
+			if _, exists := c.GetPostForm("compress_ratio"); exists && updateCfg.CompressRatio > 0 {
+				cfg.CompressRatio = updateCfg.CompressRatio
+			}
+			if _, exists := c.GetPostForm("thumbnail"); exists {
+				cfg.Thumbnail = updateCfg.Thumbnail
+			}
+			if _, exists := c.GetPostForm("thumbnail_w"); exists && updateCfg.ThumbnailW > 0 {
+				cfg.ThumbnailW = updateCfg.ThumbnailW
+			}
+			if _, exists := c.GetPostForm("thumbnail_h"); exists && updateCfg.ThumbnailH > 0 {
+				cfg.ThumbnailH = updateCfg.ThumbnailH
+			}
+			if _, exists := c.GetPostForm("webp_convert"); exists {
+				cfg.WebpConvert = updateCfg.WebpConvert
+			}
+			if _, exists := c.GetPostForm("webp_quality"); exists && updateCfg.WebpQuality > 0 {
+				cfg.WebpQuality = updateCfg.WebpQuality
+			}
+			if _, exists := c.GetPostForm("showSwitch"); exists {
+				cfg.ShowSwitch = updateCfg.ShowSwitch
+			}
+			if _, exists := c.GetPostForm("history"); exists {
+				cfg.History = updateCfg.History
+			}
+			if _, exists := c.GetPostForm("showSort"); exists {
+				cfg.ShowSort = updateCfg.ShowSort
+			}
+			if _, exists := c.GetPostForm("listNumber"); exists && updateCfg.ListNumber > 0 {
+				cfg.ListNumber = updateCfg.ListNumber
+			}
+			if _, exists := c.GetPostForm("listDate"); exists && updateCfg.ListDate > 0 {
+				cfg.ListDate = updateCfg.ListDate
+			}
+			if _, exists := c.GetPostForm("dark-mode"); exists {
+				cfg.DarkMode = updateCfg.DarkMode
+			}
+			if _, exists := c.GetPostForm("show_user_hash_del"); exists {
+				cfg.ShowUserHashDel = updateCfg.ShowUserHashDel
+			}
+			if _, exists := c.GetPostForm("image_recycl"); exists {
+				cfg.ImageRecycle = updateCfg.ImageRecycle
+			}
+			if _, exists := c.GetPostForm("ip_upload_counts"); exists {
+				cfg.IPUploadCounts = updateCfg.IPUploadCounts
+			}
+			if _, exists := c.GetPostForm("theme"); exists {
+				cfg.Theme = updateCfg.Theme
+			}
+			if _, exists := c.GetPostForm("footer"); exists {
+				cfg.Footer = updateCfg.Footer
+			}
 			// 注意：不更新 Password, User, Path, Port, HideKey 等敏感字段
 
 			if err := config.Save(cfg); err != nil {
