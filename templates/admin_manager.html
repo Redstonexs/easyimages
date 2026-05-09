@@ -31,7 +31,7 @@
                     </div>
                     <div class="panel-body">
                         <p>版本: v{{.version}}</p>
-                        <p>文件�? {{.totalFiles}}</p>
+                        <p>文件数: {{.totalFiles}}</p>
                         <p>已用空间: {{format_size .usedSpace}}</p>
                     </div>
                 </div>
@@ -60,7 +60,7 @@
                                 <input type="text" name="path" class="form-control" value="{{.config.Path}}">
                             </div>
                             <div class="form-group">
-                                <label>最大上传大�?(字节)</label>
+                                <label>最大上传大小 (字节)</label>
                                 <input type="number" name="maxSize" class="form-control" value="{{.config.MaxSize}}">
                             </div>
                             <div class="form-group">
@@ -72,25 +72,25 @@
                                 <input type="number" name="compress_ratio" class="form-control" value="{{.config.CompressRatio}}" min="1" max="100">
                             </div>
                             <div class="form-group">
-                                <label>缩略�?/label>
+                                <label>缩略图模式</label>
                                 <select name="thumbnail" class="form-control">
-                                    <option value="0" {{if eq .config.Thumbnail 0}}selected{{end}}>不生�?/option>
-                                    <option value="1" {{if eq .config.Thumbnail 1}}selected{{end}}>访问时生�?/option>
-                                    <option value="2" {{if eq .config.Thumbnail 2}}selected{{end}}>上传时生�?/option>
+                                    <option value="0" {{if eq .config.Thumbnail 0}}selected{{end}}>不生成</option>
+                                    <option value="1" {{if eq .config.Thumbnail 1}}selected{{end}}>访问时生成</option>
+                                    <option value="2" {{if eq .config.Thumbnail 2}}selected{{end}}>上传时生成</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>缩略图宽�?/label>
+                                <label>缩略图宽度</label>
                                 <input type="number" name="thumbnail_w" class="form-control" value="{{.config.ThumbnailW}}">
                             </div>
                             <div class="form-group">
-                                <label>缩略图高�?/label>
+                                <label>缩略图高度</label>
                                 <input type="number" name="thumbnail_h" class="form-control" value="{{.config.ThumbnailH}}">
                             </div>
                             <div class="form-group">
                                 <label>水印类型</label>
                                 <select name="watermark" class="form-control">
-                                    <option value="0" {{if eq .config.Watermark 0}}selected{{end}}>无水�?/option>
+                                    <option value="0" {{if eq .config.Watermark 0}}selected{{end}}>无水印</option>
                                     <option value="1" {{if eq .config.Watermark 1}}selected{{end}}>文字水印</option>
                                     <option value="2" {{if eq .config.Watermark 2}}selected{{end}}>图片水印</option>
                                 </select>
@@ -131,4 +131,3 @@
     </script>
 </body>
 </html>
-
