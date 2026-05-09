@@ -34,6 +34,7 @@ func main() {
 		cfg.Path + "/cache",
 		cfg.Path + "/suspic",
 		cfg.Path + "/recycle",
+		cfg.Path + "/webp",
 		"admin/logs/upload",
 		"admin/logs/ipcounts",
 	}
@@ -133,6 +134,10 @@ func main() {
 	imgRoutePath := strings.TrimRight(cfg.Path, "/")
 	r.Static(imgRoutePath, "."+cfg.Path)
 
+	// WebP图片静态文件服务
+	webpRoutePath := imgRoutePath + "/webp"
+	r.Static(webpRoutePath, "."+cfg.Path+"/webp")
+
 	// favicon
 	r.StaticFile("/favicon.ico", "./public/images/favicon.ico")
 
@@ -154,6 +159,7 @@ func main() {
 
 	// API路由
 	r.POST("/api/index", handler.APIUpload(cfg))
+	r.GET("/api/urllist", handler.ImageURLListAPI(cfg))
 	r.OPTIONS("/api/index", func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS")
@@ -171,6 +177,7 @@ func main() {
 		admin.GET("/chart", middleware.RequireAdmin(cfg), handler.Chart(cfg))
 		admin.GET("/history", middleware.RequireAdmin(cfg), handler.History(cfg))
 		admin.POST("/history", middleware.RequireAdmin(cfg), handler.HistoryDelete(cfg))
+		admin.GET("/urllist", middleware.RequireAdmin(cfg), handler.ImageURLList(cfg))
 		admin.GET("/filer", middleware.RequireAdmin(cfg), handler.Filer(cfg))
 		admin.POST("/del", middleware.RequireAdmin(cfg), handler.AdminDelete(cfg))
 	}

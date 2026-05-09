@@ -114,16 +114,27 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 		imageURL = cfg.Domain + "/app/hide?key=" + hideKey
 	}
 
-	// 异步处理图片后处理（压缩、水印、格式转换）
+	// 异步处理图片后处理（压缩、水印、格式转换、WebP转换）
 	go ProcessImageAfterUpload(filePath, cfg)
 
+	// 生成WebP URL（如果配置了WebP转换）
+	webpURL := ""
+	if cfg.WebpConvert == 1 {
+		webpRelativePath := cfg.Path + storagePath + fileName + ".webp"
+		webpURL = cfg.Domain + webpRelativePath
+		if cfg.HidePath == 1 {
+			webpURL = strings.Replace(webpURL, cfg.Path, "/", 1)
+		}
+	}
+
 	return map[string]interface{}{
-		"result":  "success",
-		"code":    200,
-		"url":     imageURL,
-		"srcName": strings.TrimSuffix(fileHeader.Filename, filepath.Ext(fileHeader.Filename)),
-		"thumb":   thumbURL,
-		"del":     delURL,
+		"result":   "success",
+		"code":     200,
+		"url":      imageURL,
+		"srcName":  strings.TrimSuffix(fileHeader.Filename, filepath.Ext(fileHeader.Filename)),
+		"thumb":    thumbURL,
+		"del":      delURL,
+		"webp_url": webpURL,
 	}
 }
 
@@ -428,6 +439,72 @@ func ProcessImageAfterUpload(filePath string, cfg *config.Config) {
 	if cfg.ImgConvert != "" {
 		ConvertImage(filePath, cfg.ImgConvert)
 	}
+
+	// WebP转换
+	if cfg.WebpConvert == 1 {
+		ConvertToWebP(filePath, cfg)
+	}
+}
+
+// ConvertToWebP 将图片转换为WebP格式并存储到独立文件夹
+func ConvertToWebP(imgPath string, cfg *config.Config) error {
+	// 跳过已经是webp的文件
+	ext := strings.ToLower(filepath.Ext(imgPath))
+	if ext == ".webp" {
+		return nil
+	}
+
+	// 跳过动态图片（gif）
+	if ext == ".gif" && IsGifAnimated(imgPath) {
+		return nil
+	}
+
+	// 打开图片
+	img, err := imaging.Open(imgPath)
+	if err != nil {
+		return err
+	}
+
+	// 生成webp存储路径
+	// 原始路径如: ./i/2026/05/08/xxx.jpg
+	// webp路径如: ./i/webp/2026/05/08/xxx.webp
+	relPath, err := filepath.Rel(".", imgPath)
+	if err != nil {
+		return err
+	}
+
+	webpDir := filepath.Join(".", cfg.Path, "webp")
+	webpPath := filepath.Join(webpDir, strings.TrimSuffix(relPath, filepath.Ext(relPath))+".webp")
+
+	// 确保目录存在
+	if err := os.MkdirAll(filepath.Dir(webpPath), 0755); err != nil {
+		return err
+	}
+
+	// 保存为webp格式
+	quality := cfg.WebpQuality
+	if quality == 0 {
+		quality = 80
+	}
+	return imaging.Save(img, webpPath, imaging.JPEGQuality(quality))
+}
+
+// GetWebPURL 获取图片的WebP版本URL
+func GetWebPURL(originalPath string, cfg *config.Config) string {
+	ext := strings.ToLower(filepath.Ext(originalPath))
+	if ext == ".webp" {
+		return cfg.Domain + originalPath
+	}
+
+	webpPath := strings.TrimSuffix(originalPath, filepath.Ext(originalPath)) + ".webp"
+	webpFsPath := filepath.Join(".", webpPath)
+
+	// 检查webp文件是否存在
+	if _, err := os.Stat(webpFsPath); err == nil {
+		return cfg.Domain + webpPath
+	}
+
+	return ""
 }
 
 // GetAllowedExtensions 获取允许的扩展名

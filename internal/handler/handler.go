@@ -776,6 +776,8 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 			cfg.Thumbnail = updateCfg.Thumbnail
 			cfg.ThumbnailW = updateCfg.ThumbnailW
 			cfg.ThumbnailH = updateCfg.ThumbnailH
+			cfg.WebpConvert = updateCfg.WebpConvert
+			cfg.WebpQuality = updateCfg.WebpQuality
 			cfg.ShowSwitch = updateCfg.ShowSwitch
 			cfg.History = updateCfg.History
 			cfg.ShowSort = updateCfg.ShowSort
@@ -988,6 +990,155 @@ func Filer(cfg *config.Config) gin.HandlerFunc {
 			"dirs":       dirs,
 			"path":       reqPath,
 			"parentPath": parentPath,
+		})
+	}
+}
+
+// ImageURLList 图片URL列表页面
+func ImageURLList(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		reqPath := c.DefaultQuery("path", cfg.Path)
+		pageStr := c.DefaultQuery("page", "1")
+		pageSizeStr := c.DefaultQuery("page_size", "50")
+
+		page, _ := strconv.Atoi(pageStr)
+		if page < 1 {
+			page = 1
+		}
+		pageSize, _ := strconv.Atoi(pageSizeStr)
+		if pageSize < 1 || pageSize > 200 {
+			pageSize = 50
+		}
+
+		// 验证路径安全性
+		if strings.Contains(reqPath, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			return
+		}
+		if !strings.HasPrefix(reqPath, cfg.Path) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			return
+		}
+		if !strings.HasSuffix(reqPath, "/") {
+			reqPath += "/"
+		}
+
+		fsPath := "." + reqPath
+
+		// 获取所有图片文件
+		allFiles := service.GetFileListRecursive(fsPath)
+
+		// 计算分页
+		total := len(allFiles)
+		totalPages := (total + pageSize - 1) / pageSize
+		start := (page - 1) * pageSize
+		end := start + pageSize
+		if start > total {
+			start = total
+		}
+		if end > total {
+			end = total
+		}
+
+		// 构建文件URL列表
+		type FileInfo struct {
+			Name    string `json:"name"`
+			URL     string `json:"url"`
+			WebPURL string `json:"webp_url,omitempty"`
+		}
+
+		files := make([]FileInfo, 0, end-start)
+		for _, name := range allFiles[start:end] {
+			relativePath := reqPath + name
+			url := cfg.Domain + relativePath
+			webpURL := service.GetWebPURL(relativePath, cfg)
+
+			files = append(files, FileInfo{
+				Name:    name,
+				URL:     url,
+				WebPURL: webpURL,
+			})
+		}
+
+		c.HTML(http.StatusOK, "admin_urllist.html", gin.H{
+			"config":     cfg,
+			"files":      files,
+			"path":       reqPath,
+			"page":       page,
+			"pageSize":   pageSize,
+			"total":      total,
+			"totalPages": totalPages,
+		})
+	}
+}
+
+// ImageURLListAPI 图片URL列表API（JSON）
+func ImageURLListAPI(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		reqPath := c.DefaultQuery("path", cfg.Path)
+		pageStr := c.DefaultQuery("page", "1")
+		pageSizeStr := c.DefaultQuery("page_size", "100")
+
+		page, _ := strconv.Atoi(pageStr)
+		if page < 1 {
+			page = 1
+		}
+		pageSize, _ := strconv.Atoi(pageSizeStr)
+		if pageSize < 1 || pageSize > 500 {
+			pageSize = 100
+		}
+
+		// 验证路径安全性
+		if strings.Contains(reqPath, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			return
+		}
+		if !strings.HasPrefix(reqPath, cfg.Path) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			return
+		}
+		if !strings.HasSuffix(reqPath, "/") {
+			reqPath += "/"
+		}
+
+		fsPath := "." + reqPath
+		allFiles := service.GetFileListRecursive(fsPath)
+
+		total := len(allFiles)
+		start := (page - 1) * pageSize
+		end := start + pageSize
+		if start > total {
+			start = total
+		}
+		if end > total {
+			end = total
+		}
+
+		type FileInfo struct {
+			Name    string `json:"name"`
+			URL     string `json:"url"`
+			WebPURL string `json:"webp_url,omitempty"`
+		}
+
+		files := make([]FileInfo, 0, end-start)
+		for _, name := range allFiles[start:end] {
+			relativePath := reqPath + name
+			url := cfg.Domain + relativePath
+			webpURL := service.GetWebPURL(relativePath, cfg)
+
+			files = append(files, FileInfo{
+				Name:    name,
+				URL:     url,
+				WebPURL: webpURL,
+			})
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"total":      total,
+			"page":       page,
+			"page_size":  pageSize,
+			"total_pages": (total + pageSize - 1) / pageSize,
+			"files":      files,
 		})
 	}
 }

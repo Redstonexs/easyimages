@@ -16,6 +16,7 @@
             <ul class="nav navbar-nav navbar-right">
                 <li><a href="/">首页</a></li>
                 <li><a href="/admin/history">历史上传</a></li>
+                <li><a href="/admin/urllist">图片列表</a></li>
                 <li><a href="/admin/chart">统计</a></li>
                 <li><a href="/admin/filer">文件管理</a></li>
             </ul>
@@ -87,6 +88,21 @@
                                 <label>缩略图高度</label>
                                 <input type="number" name="thumbnail_h" class="form-control" value="{{.config.ThumbnailH}}">
                             </div>
+                            <hr>
+                            <h4><i class="icon icon-file-image"></i> WebP转换设置</h4>
+                            <div class="form-group">
+                                <label>自动转换WebP</label>
+                                <select name="webp_convert" class="form-control">
+                                    <option value="0" {{if eq .config.WebpConvert 0}}selected{{end}}>关闭</option>
+                                    <option value="1" {{if eq .config.WebpConvert 1}}selected{{end}}>开启</option>
+                                </select>
+                                <p class="help-block">开启后上传图片会自动生成WebP版本，存储在独立文件夹中</p>
+                            </div>
+                            <div class="form-group">
+                                <label>WebP质量 (1-100)</label>
+                                <input type="number" name="webp_quality" class="form-control" value="{{.config.WebpQuality}}" min="1" max="100">
+                            </div>
+                            <hr>
                             <div class="form-group">
                                 <label>水印类型</label>
                                 <select name="watermark" class="form-control">

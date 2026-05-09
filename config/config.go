@@ -118,6 +118,8 @@ type Config struct {
 	TokenSuffixID       int      `json:"token_suffix_ID"`
 	AdminPath           string   `json:"admin_path"`
 	Chunks              int      `json:"chunks"`
+	WebpConvert         int      `json:"webp_convert"`
+	WebpQuality         int      `json:"webp_quality"`
 	NProgressDefault    string   `json:"NProgress_default"`
 	NProgressProgress   string   `json:"NProgress_Progress"`
 	Footer              string   `json:"footer"`
@@ -288,6 +290,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.CompressRatio == 0 {
 		cfg.CompressRatio = 80
+	}
+	if cfg.WebpQuality == 0 {
+		cfg.WebpQuality = 80
 	}
 	if cfg.ThumbnailW == 0 {
 		cfg.ThumbnailW = 258

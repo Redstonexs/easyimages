@@ -458,6 +458,21 @@ func CountFilesByExt(dir, ext string) int {
 	return count
 }
 
+// GetFileListRecursive 递归获取目录下所有文件名
+func GetFileListRecursive(dir string) []string {
+	var files []string
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			files = append(files, info.Name())
+		}
+		return nil
+	})
+	return files
+}
+
 // validateGlobPattern 验证glob模式字符串安全性
 func validateGlobPattern(pattern string) error {
 	// 检查是否包含路径遍历组件
