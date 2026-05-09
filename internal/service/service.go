@@ -618,6 +618,20 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 		return "", err
 	}
 
+	// 二次验证：解析符号链接后确认真实路径仍在允许目录内
+	// 这同时满足 CodeQL path-injection 检测对显式校验的要求
+	resolvedPath, err := filepath.EvalSymlinks(safeSrcPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid source path")
+	}
+	allowedDir, err := filepath.Abs(filepath.Join(".", cfg.Path))
+	if err != nil {
+		return "", fmt.Errorf("invalid config path")
+	}
+	if !strings.HasPrefix(resolvedPath, allowedDir+string(filepath.Separator)) && resolvedPath != allowedDir {
+		return "", fmt.Errorf("path escapes allowed directory")
+	}
+
 	// 缓存目录
 	cacheDir := filepath.Join(".", cfg.Path, "cache")
 	os.MkdirAll(cacheDir, 0755)
@@ -632,16 +646,11 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 		return thumbPath, nil
 	}
 
-	// 使用imaging库生成缩略图
-	if _, err := os.Stat(safeSrcPath); err != nil {
-		return "", err
-	}
-
-	// 打开原始图片
-	srcImg, err := imaging.Open(safeSrcPath)
+	// 打开原始图片（使用经过符号链接解析验证的路径）
+	srcImg, err := imaging.Open(resolvedPath)
 	if err != nil {
 		// 如果无法打开（如非图片文件），复制原文件
-		src, err := os.Open(safeSrcPath)
+		src, err := os.Open(resolvedPath)
 		if err != nil {
 			return "", err
 		}
