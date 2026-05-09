@@ -11,13 +11,13 @@
     <nav class="navbar navbar-default">
         <div class="container">
             <div class="navbar-header">
-                <a class="navbar-brand" href="/admin/manager.php">EasyImage 管理后台</a>
+                <a class="navbar-brand" href="/admin/manager">EasyImage 管理后台</a>
             </div>
             <ul class="nav navbar-nav navbar-right">
                 <li><a href="/">首页</a></li>
-                <li><a href="/app/list.php">广场</a></li>
-                <li><a href="/admin/chart.php">统计</a></li>
-                <li><a href="/admin/filer.php">文件管理</a></li>
+                <li><a href="/app/list">广场</a></li>
+                <li><a href="/admin/chart">统计</a></li>
+                <li><a href="/admin/filer">文件管理</a></li>
             </ul>
         </div>
     </nav>
@@ -34,7 +34,7 @@
                 <table class="table table-hover">
                     <thead>
                         <tr>
-                            <th>文件名</th>
+                            <th>文件�?/th>
                             <th>操作</th>
                         </tr>
                     </thead>
@@ -72,7 +72,7 @@
         $('.delete-btn').on('click', function() {
             const url = $(this).data('url');
             if (confirm('确认删除此文件？')) {
-                $.post('/admin/del.php', {
+                $.post('/admin/del', {
                     url: url,
                     mode: 'delete'
                 }, function(data) {
@@ -94,3 +94,4 @@
     </script>
 </body>
 </html>
+

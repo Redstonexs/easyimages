@@ -65,22 +65,22 @@ func main() {
 
 	// 页面路由
 	r.GET("/", handler.Index(cfg))
-	r.GET("/app/list.php", handler.List(cfg))
-	r.GET("/app/info.php", handler.Info(cfg))
-	r.GET("/app/down.php", handler.Download(cfg))
-	r.GET("/app/thumb.php", handler.Thumbnail(cfg))
-	r.GET("/app/hide.php", handler.HideImage(cfg))
-	r.GET("/app/del.php", handler.DeleteByHash(cfg))
+	r.GET("/app/list", handler.List(cfg))
+	r.GET("/app/info", handler.Info(cfg))
+	r.GET("/app/down", handler.Download(cfg))
+	r.GET("/app/thumb", handler.Thumbnail(cfg))
+	r.GET("/app/hide", handler.HideImage(cfg))
+	r.GET("/app/del", handler.DeleteByHash(cfg))
 
 	// 登录API
 	r.POST("/api/login", handler.AdminLoginAPI(cfg))
 
 	// 上传路由
-	r.POST("/app/upload.php", middleware.CheckLogin(cfg), handler.Upload(cfg))
+	r.POST("/app/upload", middleware.CheckLogin(cfg), handler.Upload(cfg))
 
 	// API路由
-	r.POST("/api/index.php", handler.APIUpload(cfg))
-	r.OPTIONS("/api/index.php", func(c *gin.Context) {
+	r.POST("/api/index", handler.APIUpload(cfg))
+	r.OPTIONS("/api/index", func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type")
@@ -90,17 +90,17 @@ func main() {
 	// 管理后台
 	admin := r.Group("/admin")
 	{
-		admin.GET("/index.php", handler.AdminIndex(cfg))
-		admin.POST("/index.php", handler.AdminLogin(cfg))
-		admin.GET("/manager.php", middleware.RequireAdmin(cfg), handler.Manager(cfg))
-		admin.POST("/manager.php", middleware.RequireAdmin(cfg), handler.ManagerAction(cfg))
-		admin.GET("/chart.php", middleware.RequireAdmin(cfg), handler.Chart(cfg))
-		admin.GET("/filer.php", middleware.RequireAdmin(cfg), handler.Filer(cfg))
-		admin.POST("/del.php", middleware.RequireAdmin(cfg), handler.AdminDelete(cfg))
+		admin.GET("/index", handler.AdminIndex(cfg))
+		admin.POST("/index", handler.AdminLogin(cfg))
+		admin.GET("/manager", middleware.RequireAdmin(cfg), handler.Manager(cfg))
+		admin.POST("/manager", middleware.RequireAdmin(cfg), handler.ManagerAction(cfg))
+		admin.GET("/chart", middleware.RequireAdmin(cfg), handler.Chart(cfg))
+		admin.GET("/filer", middleware.RequireAdmin(cfg), handler.Filer(cfg))
+		admin.POST("/del", middleware.RequireAdmin(cfg), handler.AdminDelete(cfg))
 	}
 
 	// 删除操作
-	r.POST("/app/del.php", middleware.CheckLogin(cfg), handler.DeleteAction(cfg))
+	r.POST("/app/del", middleware.CheckLogin(cfg), handler.DeleteAction(cfg))
 
 	// 安装页面
 	r.GET("/install/", handler.Install(cfg))

@@ -82,13 +82,13 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	imageURL := cfg.Domain + relativePath
 
 	// 生成缩略图URL
-	thumbURL := cfg.Domain + "/app/thumb.php?img=" + relativePath
+	thumbURL := cfg.Domain + "/app/thumb?img=" + relativePath
 
 	// 生成删除链接
 	delURL := ""
 	if cfg.ShowUserHashDel == 1 {
 		delHash := EncryptHash(relativePath, cfg.Password)
-		delURL = cfg.Domain + "/app/del.php?hash=" + delHash
+		delURL = cfg.Domain + "/app/del?hash=" + delHash
 	}
 
 	// 如果启用了隐藏路径
@@ -99,7 +99,7 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	// 如果启用了源图保护
 	if cfg.Hide == 1 {
 		hideKey := EncryptHideKey(relativePath, cfg.HideKey)
-		imageURL = cfg.Domain + "/app/hide.php?key=" + hideKey
+		imageURL = cfg.Domain + "/app/hide?key=" + hideKey
 	}
 
 	// 异步处理图片后处理（压缩、水印、格式转换）
@@ -190,7 +190,6 @@ func createTextWatermark(text string, fontSize int, clr color.RGBA) image.Image 
 	img := image.NewRGBA(image.Rect(0, 0, textWidth, textHeight))
 
 	// 绘制文字（简单实现，使用像素点绘制）
-	// 注意：这里使用简化的实现，生产环境应使用golang.org/x/image/font
 	drawText(img, text, 10, fontSize+5, clr)
 
 	return img
@@ -198,8 +197,6 @@ func createTextWatermark(text string, fontSize int, clr color.RGBA) image.Image 
 
 // drawText 绘制文字（简化实现）
 func drawText(img *image.RGBA, text string, x, y int, clr color.RGBA) {
-	// 使用简单的像素绘制实现文字水印
-	// 这里只是一个简化实现，实际项目应使用字体库
 	for i, ch := range text {
 		drawChar(img, ch, x+i*12, y, clr)
 	}
@@ -207,8 +204,6 @@ func drawText(img *image.RGBA, text string, x, y int, clr color.RGBA) {
 
 // drawChar 绘制单个字符（简化实现）
 func drawChar(img *image.RGBA, ch rune, x, y int, clr color.RGBA) {
-	// 简化的字符绘制，实际应使用字体库
-	// 这里绘制一个简单的矩形作为占位符
 	for dy := 0; dy < 10; dy++ {
 		for dx := 0; dx < 8; dx++ {
 			img.Set(x+dx, y-dy, clr)
@@ -339,7 +334,6 @@ func ConvertImage(imgPath, format string) (string, error) {
 	case "png":
 		err = imaging.Save(img, newPath, imaging.PNGCompressionLevel(png.BestCompression))
 	case "webp":
-		// imaging库支持WebP格式（需要编译时支持）
 		err = imaging.Save(img, newPath, imaging.JPEGQuality(90))
 	default:
 		return "", fmt.Errorf("unsupported format: %s", format)
@@ -386,13 +380,24 @@ func IsGifAnimated(path string) bool {
 	return false
 }
 
-// CreateTextWatermark 创建文字水印图片
-func CreateTextWatermark(text string, fontSize int, clr color.RGBA) image.Image {
-	// 简化版本，实际需要使用字体渲染库
-	// 这里创建一个简单的透明图片作为占位符
-	img := image.NewRGBA(image.Rect(0, 0, 200, 50))
-	draw.Draw(img, img.Bounds(), image.Transparent, image.Point{}, draw.Src)
-	return img
+// IsAnimatedWebP 检查WebP是否动态
+func IsAnimatedWebP(path string) bool {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(content, []byte("ANMF"))
+}
+
+// GenerateImageHash 生成图片哈希
+func GenerateImageHash(path string) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+
+	hash := sha256.Sum256(content)
+	return fmt.Sprintf("%x", hash)
 }
 
 // ProcessImageAfterUpload 上传后处理图片
@@ -447,26 +452,6 @@ func CheckSVGSecurity(path string) bool {
 	}
 
 	return true
-}
-
-// IsAnimatedWebP 检查WebP是否动态
-func IsAnimatedWebP(path string) bool {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	return bytes.Contains(content, []byte("ANMF"))
-}
-
-// GenerateImageHash 生成图片哈希（用于MD5黑名单）
-func GenerateImageHash(path string) string {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-
-	hash := sha256.Sum256(content)
-	return fmt.Sprintf("%x", hash)
 }
 
 func init() {

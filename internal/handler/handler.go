@@ -493,7 +493,7 @@ func InstallAction(cfg *config.Config) gin.HandlerFunc {
 func AdminIndex(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if service.IsAdmin(c) {
-			c.Redirect(http.StatusFound, "/admin/manager.php")
+			c.Redirect(http.StatusFound, "/admin/manager")
 			return
 		}
 
@@ -511,7 +511,7 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 		success, message := service.ValidateLogin(user, password, cfg)
 		if success {
 			service.SetAdminSession(c, user)
-			c.Redirect(http.StatusFound, "/admin/manager.php")
+			c.Redirect(http.StatusFound, "/admin/manager")
 			return
 		}
 

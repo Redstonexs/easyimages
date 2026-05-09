@@ -18,17 +18,17 @@
     <div class="container">
         <div class="text-center" style="margin: 20px 0;">
             <h1>图床广场</h1>
-            <p class="text-muted">今日上传: {{.allUpload}} 张</p>
+            <p class="text-muted">今日上传: {{.allUpload}} �?/p>
         </div>
 
         <div class="row">
             <div class="col-md-12">
                 <div class="btn-toolbar">
                     <div class="btn-group">
-                        <a class="btn btn-primary" href="/app/list.php">今日</a>
-                        <a class="btn btn-default" href="/app/list.php?date={{.yesterday}}">昨日</a>
+                        <a class="btn btn-primary" href="/app/list">今日</a>
+                        <a class="btn btn-default" href="/app/list?date={{.yesterday}}">昨日</a>
                         {{range .dateLinks}}
-                        <a class="btn btn-default hidden-xs" href="/app/list.php?date={{.Date}}">{{.Label}}</a>
+                        <a class="btn btn-default hidden-xs" href="/app/list?date={{.Date}}">{{.Label}}</a>
                         {{end}}
                     </div>
                     <div class="btn-group">
@@ -57,10 +57,10 @@
                         <a href="#" class="copy" data-clipboard-text="{{$.config.Domain}}{{$.config.Path}}{{$.date}}{{.}}" title="复制链接">
                             <i class="icon icon-copy"></i>
                         </a>
-                        <a href="/app/info.php?img={{$.config.Path}}{{$.date}}{{.}}" target="_blank" title="详细信息">
+                        <a href="/app/info?img={{$.config.Path}}{{$.date}}{{.}}" target="_blank" title="详细信息">
                             <i class="icon icon-info-sign"></i>
                         </a>
-                        <a href="/app/down.php?dw={{$.config.Path}}{{$.date}}{{.}}" target="_blank" title="下载">
+                        <a href="/app/down?dw={{$.config.Path}}{{$.date}}{{.}}" target="_blank" title="下载">
                             <i class="icon icon-cloud-download"></i>
                         </a>
                     </div>
@@ -100,10 +100,10 @@
             }).show();
         });
 
-        // 懒加载
-        new Lazy({
+        // 懒加�?        new Lazy({
             delay: 300
         });
     </script>
 </body>
 </html>
+
