@@ -4,9 +4,11 @@ import (
 	"easyimage/config"
 	"easyimage/internal/service"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,6 +173,155 @@ func Upload(cfg *config.Config) gin.HandlerFunc {
 				"files":   results,
 			})
 		}
+	}
+}
+
+// ChunkUpload 分片上传处理
+// 大文件被前端切分为小块逐个上传，避免单个请求过大触发网关超时(如Cloudflare 524)
+func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 检查登录
+		if cfg.MustLogin == 1 {
+			if !service.IsLoggedIn(c) {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"result": "failed", "code": 401, "message": "本站已开启登陆上传,您尚未登陆",
+				})
+				return
+			}
+		}
+
+		uploadId := c.PostForm("uploadId")
+		chunkIndexStr := c.PostForm("chunkIndex")
+		totalChunksStr := c.PostForm("totalChunks")
+		filename := c.PostForm("filename")
+
+		if uploadId == "" || chunkIndexStr == "" || totalChunksStr == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "缺少分片参数"})
+			return
+		}
+
+		chunkIndex, err := strconv.Atoi(chunkIndexStr)
+		if err != nil || chunkIndex < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的分片索引"})
+			return
+		}
+		totalChunks, err := strconv.Atoi(totalChunksStr)
+		if err != nil || totalChunks <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的分片总数"})
+			return
+		}
+
+		// 安全校验 uploadId
+		for _, ch := range uploadId {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-') {
+				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的上传ID"})
+				return
+			}
+		}
+
+		chunk, err := c.FormFile("chunk")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 204, "message": "没有分片数据"})
+			return
+		}
+
+		// 保存分片
+		chunkDir := filepath.Join(".", cfg.Path, "chunks", uploadId)
+		os.MkdirAll(chunkDir, 0755)
+		chunkPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", chunkIndex))
+		if err := c.SaveUploadedFile(chunk, chunkPath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "保存分片失败"})
+			return
+		}
+
+		// 非最后分片，直接返回
+		if chunkIndex < totalChunks-1 {
+			c.JSON(http.StatusOK, gin.H{"result": "success", "code": 200, "message": "分片上传成功", "chunkIndex": chunkIndex})
+			return
+		}
+
+		// === 最后一个分片：合并 ===
+		if filename == "" {
+			filename = "upload"
+		}
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
+		if !service.IsAllowedExtension(filename, cfg) {
+			os.RemoveAll(chunkDir)
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "不支持的文件格式: " + ext})
+			return
+		}
+
+		baseName := strings.TrimSuffix(filename, filepath.Ext(filename))
+		newFileName := service.GenerateFileName(baseName, cfg.ImgName) + "." + ext
+		now := time.Now()
+		storagePath := cfg.StoragePath
+		storagePath = strings.Replace(storagePath, "Y", fmt.Sprintf("%04d", now.Year()), 1)
+		storagePath = strings.Replace(storagePath, "m", fmt.Sprintf("%02d", now.Month()), 1)
+		storagePath = strings.Replace(storagePath, "d", fmt.Sprintf("%02d", now.Day()), 1)
+		uploadDir := filepath.Join(".", cfg.Path, storagePath)
+		os.MkdirAll(uploadDir, 0755)
+		finalPath := filepath.Join(uploadDir, newFileName)
+
+		// 合并分片到目标文件
+		outFile, err := os.Create(finalPath)
+		if err != nil {
+			os.RemoveAll(chunkDir)
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建目标文件失败"})
+			return
+		}
+		var totalSize int64
+		for i := 0; i < totalChunks; i++ {
+			partPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", i))
+			partFile, err := os.Open(partPath)
+			if err != nil {
+				outFile.Close()
+				os.Remove(finalPath)
+				os.RemoveAll(chunkDir)
+				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": fmt.Sprintf("缺少分片 %d", i)})
+				return
+			}
+			n, _ := io.Copy(outFile, partFile)
+			partFile.Close()
+			totalSize += n
+		}
+		outFile.Close()
+		os.RemoveAll(chunkDir) // 清理分片
+
+		// 检查文件大小
+		if totalSize > cfg.MaxSize {
+			os.Remove(finalPath)
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": fmt.Sprintf("文件大小超过限制: %s", service.FormatSize(cfg.MaxSize))})
+			return
+		}
+
+		// SVG 安全检查
+		if ext == "svg" && !service.CheckSVGSecurity(finalPath) {
+			os.Remove(finalPath)
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "SVG文件包含不安全内容"})
+			return
+		}
+
+		// 生成URL
+		relativePath := cfg.Path + storagePath + newFileName
+		imageURL := cfg.Domain + relativePath
+		thumbURL := cfg.Domain + "/app/thumb?img=" + relativePath
+		delURL := ""
+		if cfg.ShowUserHashDel == 1 {
+			delURL = cfg.Domain + "/app/del_hash?hash=" + service.EncryptHash(relativePath, cfg.Password)
+		}
+		if cfg.HidePath == 1 {
+			imageURL = strings.Replace(imageURL, cfg.Path, "/", 1)
+		}
+		if cfg.Hide == 1 {
+			imageURL = cfg.Domain + "/app/hide?key=" + service.EncryptHideKey(relativePath, cfg.HideKey)
+		}
+
+		go service.ProcessImageAfterUpload(finalPath, cfg)
+
+		c.JSON(http.StatusOK, gin.H{
+			"result": "success", "code": 200,
+			"url": imageURL, "srcName": baseName, "thumb": thumbURL, "del": delURL,
+		})
 	}
 }
 

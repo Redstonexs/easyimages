@@ -150,6 +150,7 @@ func main() {
 
 	// 上传路由
 	r.POST("/app/upload", middleware.CheckLogin(cfg), handler.Upload(cfg))
+	r.POST("/app/upload/chunk", middleware.CheckLogin(cfg), handler.ChunkUpload(cfg))
 
 	// API路由
 	r.POST("/api/index", handler.APIUpload(cfg))
