@@ -18,7 +18,7 @@
     <div class="container">
         <div class="text-center" style="margin: 20px 0;">
             <h1>图床广场</h1>
-            <p class="text-muted">今日上传: {{.allUpload}} �?/p>
+            <p class="text-muted">今日上传: {{.allUpload}} 张</p>
         </div>
 
         <div class="row">
@@ -26,9 +26,9 @@
                 <div class="btn-toolbar">
                     <div class="btn-group">
                         <a class="btn btn-primary" href="/app/list.php">今日</a>
-                        <a class="btn btn-default" href="/app/list.php?date={{yesterday}}">昨日</a>
-                        {{range $i := seq .listDate}}
-                        <a class="btn btn-default hidden-xs" href="/app/list.php?date={{minus_days $i}}">{{$i}}天前</a>
+                        <a class="btn btn-default" href="/app/list.php?date={{.yesterday}}">昨日</a>
+                        {{range .dateLinks}}
+                        <a class="btn btn-default hidden-xs" href="/app/list.php?date={{.Date}}">{{.Label}}</a>
                         {{end}}
                     </div>
                     <div class="btn-group">
@@ -100,10 +100,10 @@
             }).show();
         });
 
-        // 懒加�?        new Lazy({
+        // 懒加载
+        new Lazy({
             delay: 300
         });
     </script>
 </body>
 </html>
-

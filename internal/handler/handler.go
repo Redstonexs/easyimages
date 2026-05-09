@@ -47,6 +47,17 @@ func List(cfg *config.Config) gin.HandlerFunc {
 		files := service.GetFileList(basePath, cfg.ShowSort)
 		allUpload := service.GetFileCount(cfg.Path + datePath)
 
+		// 生成日期链接数据
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006/01/02/")
+		dateLinks := make([]gin.H, 0, listDate)
+		for i := 2; i <= listDate; i++ {
+			date := time.Now().AddDate(0, 0, -i).Format("2006/01/02/")
+			dateLinks = append(dateLinks, gin.H{
+				"Date":  date,
+				"Label": fmt.Sprintf("%d天前", i),
+			})
+		}
+
 		c.HTML(http.StatusOK, "list.html", gin.H{
 			"config":     cfg,
 			"files":      files,
@@ -55,6 +66,8 @@ func List(cfg *config.Config) gin.HandlerFunc {
 			"allUpload":  allUpload,
 			"search":     search,
 			"listDate":   listDate,
+			"yesterday":  yesterday,
+			"dateLinks":  dateLinks,
 		})
 	}
 }
