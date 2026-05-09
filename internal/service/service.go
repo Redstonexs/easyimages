@@ -18,6 +18,7 @@ import (
 
 	"easyimage/config"
 
+	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/hkdf"
@@ -470,26 +471,36 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 		return thumbPath, nil
 	}
 
-	// 这里应该实现实际的缩略图生成逻辑
-	// 暂时返回原图
+	// 使用imaging库生成缩略图
 	if _, err := os.Stat(safeSrcPath); err != nil {
 		return "", err
 	}
 
-	// 复制文件作为临时方案
-	src, err := os.Open(safeSrcPath)
+	// 打开原始图片
+	srcImg, err := imaging.Open(safeSrcPath)
 	if err != nil {
-		return "", err
-	}
-	defer src.Close()
+		// 如果无法打开（如非图片文件），复制原文件
+		src, err := os.Open(safeSrcPath)
+		if err != nil {
+			return "", err
+		}
+		defer src.Close()
 
-	dst, err := os.Create(thumbPath)
-	if err != nil {
-		return "", err
-	}
-	defer dst.Close()
+		dst, err := os.Create(thumbPath)
+		if err != nil {
+			return "", err
+		}
+		defer dst.Close()
 
-	_, err = io.Copy(dst, src)
+		_, err = io.Copy(dst, src)
+		return thumbPath, err
+	}
+
+	// 生成缩略图 - 居中裁剪
+	thumbImg := imaging.Fill(srcImg, cfg.ThumbnailW, cfg.ThumbnailH, imaging.Center, imaging.Lanczos)
+
+	// 保存缩略图
+	err = imaging.Save(thumbImg, thumbPath)
 	return thumbPath, err
 }
 

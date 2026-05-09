@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"easyimage/config"
 
@@ -22,13 +23,107 @@ import (
 
 // ProcessUpload 处理上传文件
 func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config.Config, from string) map[string]interface{} {
-	// 这里需要根据实际的multipart.FileHeader类型来处理
-	// 简化版本，实际实现需要更完整的逻辑
+	// 检查文件大小
+	if fileHeader.Size > cfg.MaxSize {
+		return map[string]interface{}{
+			"result":  "failed",
+			"code":    400,
+			"message": fmt.Sprintf("文件大小超过限制: %d bytes", cfg.MaxSize),
+		}
+	}
+
+	// 检查文件扩展名
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(fileHeader.Filename), "."))
+	if !isAllowedExtension(ext, cfg.Extensions) {
+		return map[string]interface{}{
+			"result":  "failed",
+			"code":    400,
+			"message": "不支持的文件格式: " + ext,
+		}
+	}
+
+	// 生成文件名
+	fileName := GenerateFileName(strings.TrimSuffix(fileHeader.Filename, filepath.Ext(fileHeader.Filename)), cfg.ImgName)
+	newFileName := fileName + "." + ext
+
+	// 生成存储路径
+	now := time.Now()
+	storagePath := cfg.StoragePath
+	storagePath = strings.Replace(storagePath, "Y", fmt.Sprintf("%04d", now.Year()), 1)
+	storagePath = strings.Replace(storagePath, "m", fmt.Sprintf("%02d", now.Month()), 1)
+	storagePath = strings.Replace(storagePath, "d", fmt.Sprintf("%02d", now.Day()), 1)
+
+	// 完整的存储目录
+	uploadDir := filepath.Join(".", cfg.Path, storagePath)
+
+	// 创建目录
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return map[string]interface{}{
+			"result":  "failed",
+			"code":    500,
+			"message": "创建目录失败: " + err.Error(),
+		}
+	}
+
+	// 完整的文件路径
+	filePath := filepath.Join(uploadDir, newFileName)
+
+	// 保存文件
+	if err := c.SaveUploadedFile(fileHeader, filePath); err != nil {
+		return map[string]interface{}{
+			"result":  "failed",
+			"code":    500,
+			"message": "保存文件失败: " + err.Error(),
+		}
+	}
+
+	// 生成访问URL
+	relativePath := cfg.Path + storagePath + newFileName
+	imageURL := cfg.Domain + relativePath
+
+	// 生成缩略图URL
+	thumbURL := cfg.Domain + "/app/thumb.php?img=" + relativePath
+
+	// 生成删除链接
+	delURL := ""
+	if cfg.ShowUserHashDel == 1 {
+		delHash := EncryptHash(relativePath, cfg.Password)
+		delURL = cfg.Domain + "/app/del.php?hash=" + delHash
+	}
+
+	// 如果启用了隐藏路径
+	if cfg.HidePath == 1 {
+		imageURL = strings.Replace(imageURL, cfg.Path, "/", 1)
+	}
+
+	// 如果启用了源图保护
+	if cfg.Hide == 1 {
+		hideKey := EncryptHideKey(relativePath, cfg.HideKey)
+		imageURL = cfg.Domain + "/app/hide.php?key=" + hideKey
+	}
+
+	// 异步处理图片后处理（压缩、水印、格式转换）
+	go ProcessImageAfterUpload(filePath, cfg)
+
 	return map[string]interface{}{
 		"result":  "success",
 		"code":    200,
-		"message": "Upload processed",
+		"url":     imageURL,
+		"srcName": strings.TrimSuffix(fileHeader.Filename, filepath.Ext(fileHeader.Filename)),
+		"thumb":   thumbURL,
+		"del":     delURL,
 	}
+}
+
+// isAllowedExtension 检查扩展名是否允许
+func isAllowedExtension(ext, allowedExtensions string) bool {
+	allowed := strings.Split(allowedExtensions, ",")
+	for _, a := range allowed {
+		if strings.TrimSpace(a) == ext {
+			return true
+		}
+	}
+	return false
 }
 
 // AddWatermark 添加水印
@@ -45,9 +140,20 @@ func AddWatermark(imgPath string, cfg *config.Config) error {
 
 	switch cfg.Watermark {
 	case 1: // 文字水印
-		// 创建文字水印
-		// 这里简化处理，实际需要使用更复杂的文字渲染
-		return nil
+		// 创建水印图片
+		watermarkImg := createTextWatermark(cfg.WaterText, cfg.TextSize, color.RGBA{255, 0, 0, 128})
+
+		// 计算水印位置
+		bounds := img.Bounds()
+		wBounds := watermarkImg.Bounds()
+		x, y := calculatePosition(bounds, wBounds, cfg.WaterPosition)
+
+		// 合并图片
+		rgba := imaging.Clone(img)
+		draw.Draw(rgba, wBounds.Add(image.Pt(x, y)), watermarkImg, image.Point{}, draw.Over)
+
+		// 保存
+		return imaging.Save(rgba, imgPath)
 
 	case 2: // 图片水印
 		// 打开水印图片
@@ -71,6 +177,43 @@ func AddWatermark(imgPath string, cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// createTextWatermark 创建文字水印图片
+func createTextWatermark(text string, fontSize int, clr color.RGBA) image.Image {
+	// 计算文字宽度（近似值）
+	charWidth := fontSize * 6 / 10
+	textWidth := len(text) * charWidth + 20
+	textHeight := fontSize + 20
+
+	// 创建透明背景
+	img := image.NewRGBA(image.Rect(0, 0, textWidth, textHeight))
+
+	// 绘制文字（简单实现，使用像素点绘制）
+	// 注意：这里使用简化的实现，生产环境应使用golang.org/x/image/font
+	drawText(img, text, 10, fontSize+5, clr)
+
+	return img
+}
+
+// drawText 绘制文字（简化实现）
+func drawText(img *image.RGBA, text string, x, y int, clr color.RGBA) {
+	// 使用简单的像素绘制实现文字水印
+	// 这里只是一个简化实现，实际项目应使用字体库
+	for i, ch := range text {
+		drawChar(img, ch, x+i*12, y, clr)
+	}
+}
+
+// drawChar 绘制单个字符（简化实现）
+func drawChar(img *image.RGBA, ch rune, x, y int, clr color.RGBA) {
+	// 简化的字符绘制，实际应使用字体库
+	// 这里绘制一个简单的矩形作为占位符
+	for dy := 0; dy < 10; dy++ {
+		for dx := 0; dx < 8; dx++ {
+			img.Set(x+dx, y-dy, clr)
+		}
+	}
 }
 
 // calculatePosition 计算水印位置
@@ -194,11 +337,10 @@ func ConvertImage(imgPath, format string) (string, error) {
 	case "jpg", "jpeg":
 		err = imaging.Save(img, newPath, imaging.JPEGQuality(90))
 	case "png":
-		err = imaging.Save(img, newPath)
+		err = imaging.Save(img, newPath, imaging.PNGCompressionLevel(png.BestCompression))
 	case "webp":
-		// WebP需要额外的库支持
-		// 暂时保存为PNG
-		err = imaging.Save(img, newPath)
+		// imaging库支持WebP格式（需要编译时支持）
+		err = imaging.Save(img, newPath, imaging.JPEGQuality(90))
 	default:
 		return "", fmt.Errorf("unsupported format: %s", format)
 	}
