@@ -9,9 +9,11 @@ import (
 	"image/draw"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -20,6 +22,10 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 )
+
+// 并发限制：限制同时进行的图片后处理 goroutine 数量，避免在大量上传时耗尽 CPU/内存。
+// 值为 CPU 核心数，CPU 密集型工作的最优并发度。
+var processSem = make(chan struct{}, runtime.NumCPU())
 
 // ProcessUpload 处理上传文件
 func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config.Config, from string) map[string]interface{} {
@@ -139,14 +145,13 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 }
 
 // isAllowedExtension 检查扩展名是否允许
+// 使用逗号包裹的字符串搜索，避免每次调用都 Split 分配新切片。
 func isAllowedExtension(ext, allowedExtensions string) bool {
-	allowed := strings.Split(allowedExtensions, ",")
-	for _, a := range allowed {
-		if strings.TrimSpace(a) == ext {
-			return true
-		}
+	if allowedExtensions == "" {
+		return false
 	}
-	return false
+	// ",jpg,jpeg,png," 中查找 ",ext,"
+	return strings.Contains(","+allowedExtensions+",", ","+ext+",")
 }
 
 // AddWatermark 添加水印
@@ -369,7 +374,7 @@ func ConvertImage(imgPath, format string) (string, error) {
 	return newPath, nil
 }
 
-// IsGifAnimated 检查GIF是否动态
+// IsGifAnimated 检查GIF是否动态（流式搜索，不将整个文件读入内存）
 func IsGifAnimated(path string) bool {
 	file, err := os.Open(path)
 	if err != nil {
@@ -379,52 +384,99 @@ func IsGifAnimated(path string) bool {
 
 	// 读取文件头
 	header := make([]byte, 6)
-	file.Read(header)
+	if _, err := io.ReadFull(file, header); err != nil {
+		return false
+	}
 
 	// 检查GIF魔数
 	if string(header[:3]) != "GIF" {
 		return false
 	}
 
-	// 读取更多内容检查是否有多个帧
-	buf := new(bytes.Buffer)
-	buf.ReadFrom(file)
-	content := buf.Bytes()
-
-	// 查找NETSCAPE2.0标记
-	for i := 0; i < len(content)-11; i++ {
-		if content[i] == 0x21 && content[i+1] == 0xff {
-			if string(content[i+2:i+13]) == "NETSCAPE2.0" {
-				return true
+	// 流式搜索 NETSCAPE2.0 标记
+	// 使用滑动窗口读取，保留前一块的尾部以处理跨块匹配
+	const chunkSize = 32 * 1024 // 32KB 块
+	buf := make([]byte, chunkSize)
+	prev := make([]byte, 0, 12) // 保留上一块末尾最多11字节（NETSCAPE2.0长度）
+	for {
+		n, readErr := file.Read(buf)
+		if n > 0 {
+			// 拼接上一块尾部 + 当前块
+			search := append(prev, buf[:n]...)
+			for i := 0; i < len(search)-12; i++ {
+				if search[i] == 0x21 && search[i+1] == 0xff {
+					if string(search[i+2:i+13]) == "NETSCAPE2.0" {
+						return true
+					}
+				}
 			}
+			// 保留末尾最多11字节作为下一块的前缀
+			if len(search) > 11 {
+				prev = search[len(search)-11:]
+			} else {
+				prev = search
+			}
+		}
+		if readErr != nil {
+			break
 		}
 	}
 
 	return false
 }
 
-// IsAnimatedWebP 检查WebP是否动态
+// IsAnimatedWebP 检查WebP是否动态（流式搜索 ANMF 标记，不将整个文件读入内存）
 func IsAnimatedWebP(path string) bool {
-	content, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return false
 	}
-	return bytes.Contains(content, []byte("ANMF"))
+	defer file.Close()
+
+	// 流式搜索 "ANMF" 字节序列
+	const chunkSize = 32 * 1024
+	buf := make([]byte, chunkSize)
+	prev := make([]byte, 0, 3) // 保留上一块末尾最多3字节（ANMF长度-1）
+	for {
+		n, readErr := file.Read(buf)
+		if n > 0 {
+			search := append(prev, buf[:n]...)
+			if bytes.Contains(search, []byte("ANMF")) {
+				return true
+			}
+			if len(search) > 3 {
+				prev = search[len(search)-3:]
+			} else {
+				prev = search
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	return false
 }
 
-// GenerateImageHash 生成图片哈希
+// GenerateImageHash 生成图片哈希（流式计算，不将整个文件读入内存）
 func GenerateImageHash(path string) string {
-	content, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return ""
 	}
+	defer f.Close()
 
-	hash := sha256.Sum256(content)
-	return fmt.Sprintf("%x", hash)
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-// ProcessImageAfterUpload 上传后处理图片
+// ProcessImageAfterUpload 上传后处理图片（通过 processSem 限制并发数）
 func ProcessImageAfterUpload(filePath string, cfg *config.Config) {
+	processSem <- struct{}{}        // 获取令牌，阻塞 if 已达上限
+	defer func() { <-processSem }() // 归还令牌
+
 	// 压缩
 	if cfg.Compress == 1 {
 		CompressImage(filePath, cfg.CompressRatio)
@@ -528,40 +580,41 @@ func IsAllowedExtension(filename string, cfg *config.Config) bool {
 }
 
 // CheckSVGSecurity 检查SVG安全性，防止XSS攻击
+// 直接在字节切片上搜索，避免将整个内容转为 string 产生额外拷贝。
 func CheckSVGSecurity(path string) bool {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
 
-	str := strings.ToLower(string(content))
+	lower := bytes.ToLower(content)
 
 	// 检查已知的 XSS 向量
-	dangerousPatterns := []string{
-		"<script",      // 脚本标签
-		"javascript:",   // JavaScript URI
-		"vbscript:",     // VBScript URI
-		"data:",         // Data URI（可嵌入任意内容）
-		"<iframe",       // 内嵌框架
-		"<embed",        // 嵌入对象
-		"<object",       // 对象标签
-		"<foreignobject",// SVG foreignObject
-		"onload",        // 事件处理器
-		"onerror",       // 错误事件
-		"onclick",       // 点击事件
-		"onmouseover",   // 鼠标悬停事件
-		"onfocus",       // 焦点事件
-		"onblur",        // 失焦事件
-		"onanimationend",// 动画结束事件
-		"onbegin",       // SVG 动画开始事件
-		"<use",          // SVG use（可引用外部资源）
-		"xlink:href",    // XLink 引用
-		"<set",          // SVG set（可触发事件）
-		"<animate",      // SVG animate
+	dangerousPatterns := [][]byte{
+		[]byte("<script"),
+		[]byte("javascript:"),
+		[]byte("vbscript:"),
+		[]byte("data:"),
+		[]byte("<iframe"),
+		[]byte("<embed"),
+		[]byte("<object"),
+		[]byte("<foreignobject"),
+		[]byte("onload"),
+		[]byte("onerror"),
+		[]byte("onclick"),
+		[]byte("onmouseover"),
+		[]byte("onfocus"),
+		[]byte("onblur"),
+		[]byte("onanimationend"),
+		[]byte("onbegin"),
+		[]byte("<use"),
+		[]byte("xlink:href"),
+		[]byte("<set"),
+		[]byte("<animate"),
 	}
 
 	for _, pattern := range dangerousPatterns {
-		if strings.Contains(str, pattern) {
+		if bytes.Contains(lower, pattern) {
 			return false
 		}
 	}

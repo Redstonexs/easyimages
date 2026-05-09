@@ -719,14 +719,13 @@ func Manager(cfg *config.Config) gin.HandlerFunc {
 		// 转换为文件系统路径
 		fsPath := "." + cfg.Path
 
-		// 统计信息
-		totalFiles := service.GetFileCountRecursive(fsPath)
-		usedSpace := service.GetDirectorySize(fsPath)
+		// 单次遍历统计文件数和总大小
+		stats := service.CollectDirStats(fsPath)
 
 		c.HTML(http.StatusOK, "admin_manager.html", gin.H{
 			"config":      cfg,
-			"totalFiles":  totalFiles,
-			"usedSpace":   usedSpace,
+			"totalFiles":  stats.TotalFiles,
+			"usedSpace":   stats.TotalSize,
 			"version":     config.Version,
 		})
 	}
@@ -818,9 +817,8 @@ func Chart(cfg *config.Config) gin.HandlerFunc {
 		// 转换为文件系统路径
 		fsPath := "." + cfg.Path
 
-		// 统计信息 - 递归统计所有文件
-		totalFiles := service.GetFileCountRecursive(fsPath)
-		usedSpace := service.GetDirectorySize(fsPath)
+		// 单次遍历收集文件数、总大小和按扩展名统计
+		stats := service.CollectDirStats(fsPath)
 
 		// 获取最近30天的上传统计
 		dailyStats := make([]gin.H, 0, 30)
@@ -839,22 +837,12 @@ func Chart(cfg *config.Config) gin.HandlerFunc {
 			dailyStats[i], dailyStats[j] = dailyStats[j], dailyStats[i]
 		}
 
-		// 按格式统计 - 递归统计
-		formatStats := make(map[string]int)
-		extensions := []string{"jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"}
-		for _, ext := range extensions {
-			count := service.CountFilesByExt(fsPath, ext)
-			if count > 0 {
-				formatStats[ext] = count
-			}
-		}
-
 		c.HTML(http.StatusOK, "admin_chart.html", gin.H{
 			"config":      cfg,
-			"totalFiles":  totalFiles,
-			"usedSpace":   usedSpace,
+			"totalFiles":  stats.TotalFiles,
+			"usedSpace":   stats.TotalSize,
 			"dailyStats":  dailyStats,
-			"formatStats": formatStats,
+			"formatStats": stats.ByExt,
 		})
 	}
 }

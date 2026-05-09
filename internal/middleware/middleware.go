@@ -33,7 +33,7 @@ func CheckLogin(cfg *config.Config) gin.HandlerFunc {
 func RequireAdmin(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !service.IsAdmin(c) {
-			c.Redirect(http.StatusFound, "/admin/index.php")
+			c.Redirect(http.StatusFound, "/admin/index")
 			c.Abort()
 			return
 		}

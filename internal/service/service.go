@@ -41,6 +41,17 @@ var (
 
 const sessionMaxAge = 14 * 24 * time.Hour // 14天过期
 
+func init() {
+	// 定时清理过期 session（每小时一次），避免在登录路径上遍历整个 sync.Map
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			cleanExpiredSessions()
+		}
+	}()
+}
+
 // generateSessionToken 生成安全的随机 session token
 func generateSessionToken() (string, error) {
 	b := make([]byte, 32)
@@ -177,9 +188,6 @@ func IsAdmin(c *gin.Context) bool {
 // SetAdminSession 设置管理员会话
 func SetAdminSession(c *gin.Context, user string) {
 	cfg := config.Get()
-
-	// 清理过期 session
-	cleanExpiredSessions()
 
 	// 生成安全的随机 token
 	token, err := generateSessionToken()
@@ -358,23 +366,16 @@ func GetFileList(pattern string, sortOrder int) []string {
 		return nil
 	}
 
-	var files []string
+	// filepath.Glob 不会返回目录，无需 os.Stat 过滤
+	files := make([]string, 0, len(matches))
 	for _, match := range matches {
-		// 验证匹配的文件路径
 		if err := validateMatchedPath(match); err != nil {
 			continue
 		}
-		info, err := os.Stat(match)
-		if err != nil {
-			continue
-		}
-		if !info.IsDir() {
-			files = append(files, filepath.Base(match))
-		}
+		files = append(files, filepath.Base(match))
 	}
 
 	if sortOrder == 1 {
-		// 反转排序
 		for i, j := 0, len(files)-1; i < j; i, j = i+1, j-1 {
 			files[i], files[j] = files[j], files[i]
 		}
@@ -411,19 +412,13 @@ func GetFileCount(pattern string) int {
 		return 0
 	}
 
+	// filepath.Glob 不会返回目录，直接返回匹配数
 	count := 0
 	for _, match := range matches {
-		// 验证匹配的文件路径
 		if err := validateMatchedPath(match); err != nil {
 			continue
 		}
-		info, err := os.Stat(match)
-		if err != nil {
-			continue
-		}
-		if !info.IsDir() {
-			count++
-		}
+		count++
 	}
 	return count
 }
@@ -481,14 +476,16 @@ func GetFileListRecursive(dir string) []string {
 	return files
 }
 
+// imageExts 图片文件扩展名集合（包级变量，避免每次调用 IsImageFile 都分配新 map）
+var imageExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
+	".bmp": true, ".webp": true, ".ico": true, ".jfif": true,
+	".tif": true, ".tiff": true, ".tga": true, ".svg": true,
+}
+
 // IsImageFile 检查文件是否是图片
 func IsImageFile(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
-	imageExts := map[string]bool{
-		".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
-		".bmp": true, ".webp": true, ".ico": true, ".jfif": true,
-		".tif": true, ".tiff": true, ".tga": true, ".svg": true,
-	}
 	return imageExts[ext]
 }
 
@@ -523,6 +520,32 @@ func GetDirectorySize(path string) int64 {
 		return nil
 	})
 	return size
+}
+
+// DirStats 目录统计结果
+type DirStats struct {
+	TotalFiles int
+	TotalSize  int64
+	ByExt      map[string]int
+}
+
+// CollectDirStats 单次遍历收集目录的文件数、总大小和按扩展名统计。
+// 替代多次 GetFileCountRecursive + GetDirectorySize + CountFilesByExt 调用。
+func CollectDirStats(dir string) DirStats {
+	stats := DirStats{ByExt: make(map[string]int)}
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		stats.TotalFiles++
+		stats.TotalSize += info.Size()
+		ext := strings.ToLower(filepath.Ext(info.Name()))
+		if ext != "" {
+			stats.ByExt[ext]++
+		}
+		return nil
+	})
+	return stats
 }
 
 // FormatSize 格式化文件大小
@@ -743,17 +766,51 @@ func sanitizeFilename(name string) string	{
 	return result.String()
 }
 
-// WriteUploadLog 写入上传日志
-func WriteUploadLog(filePath, sourceName, absolutePath string, fileSize int64, from string) {
+// uploadLogEntry 上传日志条目（内存缓冲用）
+type uploadLogEntry struct {
+	FileName string                 `json:"-"`
+	Data     map[string]interface{} `json:"-"`
+}
+
+// uploadLogBuf 内存中的上传日志缓冲，定期刷盘。
+// 避免每次上传都读写整个月度 JSON 文件。
+var (
+	uploadLogBuf   []uploadLogEntry
+	uploadLogMonth string // 缓冲对应的月份 "2006-01"
+	uploadLogMu    sync.Mutex
+)
+
+func init() {
+	// 启动后台定时刷盘（每 60 秒）
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			flushUploadLog()
+		}
+	}()
+}
+
+// flushUploadLog 将内存中的上传日志写入磁盘
+func flushUploadLog() {
+	uploadLogMu.Lock()
+	defer uploadLogMu.Unlock()
+	flushUploadLogLocked()
+}
+
+func flushUploadLogLocked() {
+	if len(uploadLogBuf) == 0 || uploadLogMonth == "" {
+		return
+	}
 	cfg := config.Get()
 	if cfg.UploadLogs == 0 {
+		uploadLogBuf = nil
 		return
 	}
 
 	logDir := "admin/logs/upload"
 	os.MkdirAll(logDir, 0755)
-
-	logFile := filepath.Join(logDir, time.Now().Format("2006-01")+".json")
+	logFile := filepath.Join(logDir, uploadLogMonth+".json")
 
 	// 读取现有日志
 	logs := make(map[string]interface{})
@@ -761,24 +818,122 @@ func WriteUploadLog(filePath, sourceName, absolutePath string, fileSize int64, f
 		json.Unmarshal(data, &logs)
 	}
 
-	// 添加新日志
-	logs[filepath.Base(filePath)] = map[string]interface{}{
-		"source":   sourceName,
-		"date":     time.Now().Format("2006-01-02 15:04:05"),
-		"path":     filePath,
-		"size":     FormatSize(fileSize),
-		"from":     from,
+	// 合并缓冲中的条目
+	for _, entry := range uploadLogBuf {
+		logs[entry.FileName] = entry.Data
 	}
 
-	// 写入日志
+	// 写入
 	data, _ := json.MarshalIndent(logs, "", "  ")
 	os.WriteFile(logFile, data, 0644)
+	uploadLogBuf = nil
+}
+
+// WriteUploadLog 写入上传日志（缓冲到内存，由后台定时刷盘）
+func WriteUploadLog(filePath, sourceName, absolutePath string, fileSize int64, from string) {
+	cfg := config.Get()
+	if cfg.UploadLogs == 0 {
+		return
+	}
+
+	now := time.Now()
+	month := now.Format("2006-01")
+
+	uploadLogMu.Lock()
+	defer uploadLogMu.Unlock()
+
+	// 月份切换时先刷盘旧数据
+	if uploadLogMonth != month && uploadLogMonth != "" {
+		flushUploadLogLocked()
+	}
+	uploadLogMonth = month
+
+	uploadLogBuf = append(uploadLogBuf, uploadLogEntry{
+		FileName: filepath.Base(filePath),
+		Data: map[string]interface{}{
+			"source": sourceName,
+			"date":   now.Format("2006-01-02 15:04:05"),
+			"path":   filePath,
+			"size":   FormatSize(fileSize),
+			"from":   from,
+		},
+	})
+}
+
+// FlushUploadLogNow 立即将上传日志刷盘（供关机前或需要时调用）
+func FlushUploadLogNow() {
+	flushUploadLog()
 }
 
 // IP 上传计数互斥锁，防止并发读写竞态条件
 var ipCountMu sync.Mutex
 
-// CheckIPUploadCount 检查IP上传次数
+// ipCountCache 内存缓存，避免每次上传都读写磁盘。
+// key = "YYYY-MM-DD"，value = map[string]int (ip -> count)
+var (
+	ipCountCache    map[string]map[string]int
+	ipCountCacheDay string // 当前缓存的日期，用于检测日期切换
+)
+
+// ipCountDirty 标记缓存是否有未写入磁盘的变更
+var ipCountDirty bool
+
+func init() {
+	ipCountCache = make(map[string]map[string]int)
+	// 启动后台定时刷盘（每 30 秒）
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			flushIPCounts()
+		}
+	}()
+}
+
+// loadIPCounts 从磁盘加载当日的 IP 计数到缓存（仅在首次访问或日期切换时调用，需持锁）
+func loadIPCounts(day string) {
+	if ipCountCacheDay == day {
+		return
+	}
+	// 日期切换前先刷盘旧数据
+	if ipCountCacheDay != "" {
+		flushIPCountsLocked()
+	}
+	ipCountCacheDay = day
+	logDir := "admin/logs/ipcounts"
+	logFile := filepath.Join(logDir, day+".json")
+	counts := make(map[string]int)
+	if data, err := os.ReadFile(logFile); err == nil {
+		json.Unmarshal(data, &counts)
+	}
+	ipCountCache[day] = counts
+}
+
+// flushIPCounts 将缓存写入磁盘（无锁版本，由 flushIPCounts 和后台 goroutine 调用）
+func flushIPCountsLocked() {
+	if !ipCountDirty || ipCountCacheDay == "" {
+		return
+	}
+	logDir := "admin/logs/ipcounts"
+	os.MkdirAll(logDir, 0755)
+	logFile := filepath.Join(logDir, ipCountCacheDay+".json")
+	counts := ipCountCache[ipCountCacheDay]
+	if counts == nil {
+		counts = make(map[string]int)
+	}
+	data, _ := json.MarshalIndent(counts, "", "  ")
+	os.WriteFile(logFile, data, 0644)
+	ipCountDirty = false
+}
+
+// flushIPCounts 刷盘（带锁）
+func flushIPCounts() {
+	ipCountMu.Lock()
+	defer ipCountMu.Unlock()
+	flushIPCountsLocked()
+}
+
+// CheckIPUploadCount 检查IP上传次数（内存缓存，避免每次读写磁盘）
 func CheckIPUploadCount(ip string, limit int) bool {
 	if limit <= 0 {
 		return true
@@ -787,34 +942,34 @@ func CheckIPUploadCount(ip string, limit int) bool {
 	ipCountMu.Lock()
 	defer ipCountMu.Unlock()
 
-	logDir := "admin/logs/ipcounts"
-	logFile := filepath.Join(logDir, time.Now().Format("2006-01-02")+".json")
+	today := time.Now().Format("2006-01-02")
+	loadIPCounts(today)
 
-	counts := make(map[string]int)
-	if data, err := os.ReadFile(logFile); err == nil {
-		json.Unmarshal(data, &counts)
+	counts := ipCountCache[today]
+	if counts == nil {
+		return true
 	}
-
 	return counts[ip] < limit
 }
 
-// IncrementIPUploadCount 增加IP上传次数
+// IncrementIPUploadCount 增加IP上传次数（写入内存缓存，由后台定时刷盘）
 func IncrementIPUploadCount(ip string) {
 	ipCountMu.Lock()
 	defer ipCountMu.Unlock()
 
-	logDir := "admin/logs/ipcounts"
-	os.MkdirAll(logDir, 0755)
+	today := time.Now().Format("2006-01-02")
+	loadIPCounts(today)
 
-	logFile := filepath.Join(logDir, time.Now().Format("2006-01-02")+".json")
-
-	counts := make(map[string]int)
-	if data, err := os.ReadFile(logFile); err == nil {
-		json.Unmarshal(data, &counts)
+	counts := ipCountCache[today]
+	if counts == nil {
+		counts = make(map[string]int)
+		ipCountCache[today] = counts
 	}
-
 	counts[ip]++
+	ipCountDirty = true
+}
 
-	data, _ := json.MarshalIndent(counts, "", "  ")
-	os.WriteFile(logFile, data, 0644)
+// FlushIPCountsNow 立即将 IP 计数刷盘（供关机前或需要时调用）
+func FlushIPCountsNow() {
+	flushIPCounts()
 }
