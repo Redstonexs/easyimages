@@ -268,6 +268,22 @@ func GetFileList(pattern string, sortOrder int) []string {
 	return files
 }
 
+// GetDirList 获取目录列表
+func GetDirList(dirPath string) []string {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil
+	}
+
+	var dirs []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirs = append(dirs, entry.Name()+"/")
+		}
+	}
+	return dirs
+}
+
 // GetFileCount 获取文件数量
 func GetFileCount(pattern string) int {
 	// 验证模式字符串安全性

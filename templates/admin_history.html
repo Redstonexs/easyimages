@@ -1,0 +1,133 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>历史上传 - {{.config.Title}}</title>
+    <link rel="stylesheet" href="/public/static/zui/css/zui.min.css">
+    <link rel="stylesheet" href="/public/static/EasyImage.css">
+    <link rel="stylesheet" href="/public/static/viewjs/viewer.min.css">
+    <style>
+        .card { margin-bottom: 15px; }
+        .card img { width: 100%; height: 180px; object-fit: cover; cursor: pointer; }
+        .bottom-bar { padding: 8px; font-size: 12px; }
+        .bottom-bar a { margin-right: 8px; color: #666; }
+        .bottom-bar a:hover { color: #3280fc; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-default">
+        <div class="container">
+            <div class="navbar-header">
+                <a class="navbar-brand" href="/admin/manager">EasyImage 管理后台</a>
+            </div>
+            <ul class="nav navbar-nav navbar-right">
+                <li><a href="/">首页</a></li>
+                <li><a href="/admin/history">历史上传</a></li>
+                <li><a href="/admin/chart">统计</a></li>
+                <li><a href="/admin/filer">文件管理</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="row">
+            <div class="col-md-12">
+                <div class="panel panel-default">
+                    <div class="panel-heading">
+                        <h3 class="panel-title">
+                            <i class="icon icon-time"></i> 历史上传
+                            <span class="badge">{{.allUpload}} 张</span>
+                        </h3>
+                    </div>
+                    <div class="panel-body">
+                        <!-- 日期导航 -->
+                        <div class="btn-toolbar" style="margin-bottom: 15px;">
+                            <div class="btn-group">
+                                <a class="btn btn-primary" href="/admin/history">今日</a>
+                                <a class="btn btn-default" href="/admin/history?date={{.yesterday}}">昨日</a>
+                                {{range .dateLinks}}
+                                <a class="btn btn-default hidden-xs" href="/admin/history?date={{.Date}}">{{.Label}}</a>
+                                {{end}}
+                            </div>
+                            <div class="btn-group">
+                                <a class="btn btn-default btn-sm" href="?search=jpg">JPG</a>
+                                <a class="btn btn-default btn-sm" href="?search=png">PNG</a>
+                                <a class="btn btn-default btn-sm" href="?search=gif">GIF</a>
+                                <a class="btn btn-default btn-sm" href="?search=webp">WebP</a>
+                            </div>
+                        </div>
+
+                        <!-- 图片列表 -->
+                        <div class="row" id="gallery">
+                            {{if .files}}
+                            {{range .files}}
+                            <div class="col-lg-2 col-md-3 col-sm-4 col-xs-6">
+                                <div class="card">
+                                    <img src="/public/images/loading.svg"
+                                         data-image="{{$.config.Domain}}{{$.config.Path}}{{$.date}}{{.}}"
+                                         data-original="{{$.config.Domain}}{{$.config.Path}}{{$.date}}{{.}}"
+                                         alt="{{.}}" loading="lazy">
+                                    <div class="bottom-bar">
+                                        <a href="#" class="copy" data-clipboard-text="{{$.config.Domain}}{{$.config.Path}}{{$.date}}{{.}}" title="复制链接">
+                                            <i class="icon icon-copy"></i>
+                                        </a>
+                                        <a href="/app/info?img={{$.config.Path}}{{$.date}}{{.}}" title="详情">
+                                            <i class="icon icon-info-sign"></i>
+                                        </a>
+                                        <a href="#" class="delete-btn" data-url="{{$.config.Path}}{{$.date}}{{.}}" title="删除">
+                                            <i class="icon icon-trash"></i>
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                            {{end}}
+                            {{else}}
+                            <div class="col-md-12">
+                                <div class="alert alert-info">该日期没有上传的图片</div>
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/public/static/zui/lib/jquery/jquery-3.6.4.min.js"></script>
+    <script src="/public/static/zui/js/zui.min.js"></script>
+    <script src="/public/static/viewjs/viewer.min.js"></script>
+    <script src="/public/static/lazyload/lazyload.min.js"></script>
+    <script src="/public/static/zui/lib/clipboard/clipboard.min.js"></script>
+    <script>
+        // 图片预览
+        new Viewer(document.getElementById('gallery'), { url: 'data-original' });
+
+        // 复制链接
+        new Clipboard('.copy').on('success', function(e) {
+            new $.zui.Messager('复制成功', { type: 'success', icon: 'ok-sign' }).show();
+        });
+
+        // 懒加载
+        new Lazy({ delay: 300 });
+
+        // 删除图片
+        $('.delete-btn').on('click', function(e) {
+            e.preventDefault();
+            var url = $(this).data('url');
+            var $card = $(this).closest('.col-lg-2');
+            if (confirm('确认删除此图片？')) {
+                $.post('/admin/history', { url: url, mode: 'delete' }, function(data) {
+                    if (data.code === 200) {
+                        $card.fadeOut();
+                        new $.zui.Messager(data.msg, { type: data.type, icon: data.icon }).show();
+                    } else {
+                        new $.zui.Messager(data.msg, { type: data.type, icon: data.icon }).show();
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
+

@@ -48,6 +48,70 @@ func main() {
 	// 注册自定义模板函数
 	r.SetFuncMap(template.FuncMap{
 		"format_size": service.FormatSize,
+		"mul": func(a, b interface{}) int {
+			var ai, bi int
+			switch v := a.(type) {
+			case int:
+				ai = v
+			case float64:
+				ai = int(v)
+			}
+			switch v := b.(type) {
+			case int:
+				bi = v
+			case float64:
+				bi = int(v)
+			}
+			return ai * bi
+		},
+		"div": func(a, b interface{}) int {
+			var ai, bi int
+			switch v := a.(type) {
+			case int:
+				ai = v
+			case float64:
+				ai = int(v)
+			}
+			switch v := b.(type) {
+			case int:
+				bi = v
+			case float64:
+				bi = int(v)
+			}
+			if bi == 0 {
+				return 0
+			}
+			return ai / bi
+		},
+		"minus": func(a, b int) int {
+			return a - b
+		},
+		"len": func(v interface{}) int {
+			switch val := v.(type) {
+			case []interface{}:
+				return len(val)
+			case []gin.H:
+				return len(val)
+			default:
+				return 0
+			}
+		},
+		"index": func(arr interface{}, i int) interface{} {
+			switch val := arr.(type) {
+			case []gin.H:
+				if i >= 0 && i < len(val) {
+					return val[i]
+				}
+			case []interface{}:
+				if i >= 0 && i < len(val) {
+					return val[i]
+				}
+			}
+			return nil
+		},
+		"trimSuffix": func(suffix, s string) string {
+			return strings.TrimSuffix(s, suffix)
+		},
 	})
 
 	// 加载HTML模板
@@ -95,6 +159,8 @@ func main() {
 		admin.GET("/manager", middleware.RequireAdmin(cfg), handler.Manager(cfg))
 		admin.POST("/manager", middleware.RequireAdmin(cfg), handler.ManagerAction(cfg))
 		admin.GET("/chart", middleware.RequireAdmin(cfg), handler.Chart(cfg))
+		admin.GET("/history", middleware.RequireAdmin(cfg), handler.History(cfg))
+		admin.POST("/history", middleware.RequireAdmin(cfg), handler.HistoryDelete(cfg))
 		admin.GET("/filer", middleware.RequireAdmin(cfg), handler.Filer(cfg))
 		admin.POST("/del", middleware.RequireAdmin(cfg), handler.AdminDelete(cfg))
 	}

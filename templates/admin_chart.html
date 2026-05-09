@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -15,7 +15,7 @@
             </div>
             <ul class="nav navbar-nav navbar-right">
                 <li><a href="/">首页</a></li>
-                <li><a href="/app/list">广场</a></li>
+                <li><a href="/admin/history">历史上传</a></li>
                 <li><a href="/admin/chart">统计</a></li>
                 <li><a href="/admin/filer">文件管理</a></li>
             </ul>
@@ -23,20 +23,133 @@
     </nav>
 
     <div class="container">
+        <!-- 概览 -->
         <div class="row">
-            <div class="col-md-12">
+            <div class="col-md-3">
                 <div class="panel panel-primary">
                     <div class="panel-heading">
-                        <h3 class="panel-title">上传统计</h3>
+                        <h3 class="panel-title"><i class="icon icon-file"></i> 总文件数</h3>
+                    </div>
+                    <div class="panel-body text-center">
+                        <h2>{{.totalFiles}}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="panel panel-success">
+                    <div class="panel-heading">
+                        <h3 class="panel-title"><i class="icon icon-hdd"></i> 已用空间</h3>
+                    </div>
+                    <div class="panel-body text-center">
+                        <h2>{{format_size .usedSpace}}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="panel panel-info">
+                    <div class="panel-heading">
+                        <h3 class="panel-title"><i class="icon icon-calendar"></i> 今日上传</h3>
+                    </div>
+                    <div class="panel-body text-center">
+                        <h2>{{index (index .dailyStats (len .dailyStats | minus 1)) "Count"}}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="panel panel-warning">
+                    <div class="panel-heading">
+                        <h3 class="panel-title"><i class="icon icon-time"></i> 版本</h3>
+                    </div>
+                    <div class="panel-body text-center">
+                        <h2>v3.0.0</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 30天上传趋势 -->
+        <div class="panel panel-default">
+            <div class="panel-heading">
+                <h3 class="panel-title"><i class="icon icon-bar-chart"></i> 近30天上传趋势</h3>
+            </div>
+            <div class="panel-body">
+                <div id="dailyChart" style="height: 300px;">
+                    <div style="display: flex; align-items: flex-end; height: 250px; padding: 0 10px;">
+                        {{$maxCount := 1}}
+                        {{range .dailyStats}}
+                            {{if gt .Count $maxCount}}
+                                {{$maxCount = .Count}}
+                            {{end}}
+                        {{end}}
+                        {{range .dailyStats}}
+                        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; margin: 0 2px;">
+                            <div style="font-size: 10px; color: #666;">{{.Count}}</div>
+                            <div style="width: 100%; background: #3280fc; border-radius: 3px 3px 0 0; height: {{if gt .Count 0}}{{mul .Count 200 | div $maxCount}}px{{else}}2px{{end}}; min-height: 2px;"></div>
+                            <div style="font-size: 9px; color: #999; margin-top: 4px; transform: rotate(-45deg);">{{.Date}}</div>
+                        </div>
+                        {{end}}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 格式分布 -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="panel panel-default">
+                    <div class="panel-heading">
+                        <h3 class="panel-title"><i class="icon icon-pie-chart"></i> 格式分布</h3>
                     </div>
                     <div class="panel-body">
-                        <p>此页面将显示上传统计图表</p>
-                        <p class="text-muted">功能开发中...</p>
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>格式</th>
+                                    <th>数量</th>
+                                    <th>占比</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range $ext, $count := .formatStats}}
+                                <tr>
+                                    <td><span class="label label-primary">{{$ext}}</span></td>
+                                    <td>{{$count}}</td>
+                                    <td>
+                                        <div class="progress" style="margin-bottom: 0;">
+                                            <div class="progress-bar" style="width: {{mul $count 100 | div $.totalFiles}}%"></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="panel panel-default">
+                    <div class="panel-heading">
+                        <h3 class="panel-title"><i class="icon icon-cog"></i> 系统信息</h3>
+                    </div>
+                    <div class="panel-body">
+                        <table class="table table-bordered">
+                            <tr><td><strong>站点标题</strong></td><td>{{.config.Title}}</td></tr>
+                            <tr><td><strong>域名</strong></td><td>{{.config.Domain}}</td></tr>
+                            <tr><td><strong>存储路径</strong></td><td>{{.config.Path}}</td></tr>
+                            <tr><td><strong>最大上传</strong></td><td>{{format_size .config.MaxSize}}</td></tr>
+                            <tr><td><strong>允许格式</strong></td><td>{{.config.Extensions}}</td></tr>
+                            <tr><td><strong>缩略图</strong></td><td>{{if eq .config.Thumbnail 1}}访问时生成{{else if eq .config.Thumbnail 2}}上传时生成{{else}}关闭{{end}}</td></tr>
+                            <tr><td><strong>水印</strong></td><td>{{if eq .config.Watermark 1}}文字水印{{else if eq .config.Watermark 2}}图片水印{{else}}关闭{{end}}</td></tr>
+                            <tr><td><strong>API状态</strong></td><td>{{if .config.APIStatus}}开启{{else}}关闭{{end}}</td></tr>
+                        </table>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <script src="/public/static/zui/lib/jquery/jquery-3.6.4.min.js"></script>
+    <script src="/public/static/zui/js/zui.min.js"></script>
 </body>
 </html>
 

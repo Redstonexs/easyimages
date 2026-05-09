@@ -51,9 +51,14 @@
         </div>
 
         <div class="text-center" style="margin-top: 30px;">
-            <a href="/app/list" class="btn btn-default">
-                <i class="icon icon-list"></i> 查看图床广场
+            {{if .isAdmin}}
+            <a href="/admin/history" class="btn btn-default">
+                <i class="icon icon-time"></i> 历史上传
             </a>
+            <a href="/admin/manager" class="btn btn-default">
+                <i class="icon icon-cog"></i> 管理后台
+            </a>
+            {{end}}
             {{if .config.APIStatus}}
             <a href="/api/" class="btn btn-default">
                 <i class="icon icon-code"></i> API接口

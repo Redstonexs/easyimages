@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -6,6 +6,11 @@
     <title>文件管理 - {{.config.Title}}</title>
     <link rel="stylesheet" href="/public/static/zui/css/zui.min.css">
     <link rel="stylesheet" href="/public/static/EasyImage.css">
+    <style>
+        .file-icon { margin-right: 5px; }
+        .dir-link { font-weight: bold; }
+        .breadcrumb { margin-bottom: 15px; }
+    </style>
 </head>
 <body>
     <nav class="navbar navbar-default">
@@ -15,7 +20,7 @@
             </div>
             <ul class="nav navbar-nav navbar-right">
                 <li><a href="/">首页</a></li>
-                <li><a href="/app/list">广场</a></li>
+                <li><a href="/admin/history">历史上传</a></li>
                 <li><a href="/admin/chart">统计</a></li>
                 <li><a href="/admin/filer">文件管理</a></li>
             </ul>
@@ -27,66 +32,95 @@
             <div class="panel-heading">
                 <h3 class="panel-title">
                     <i class="icon icon-folder-open"></i> 文件管理
-                    <span class="badge">{{.path}}</span>
                 </h3>
             </div>
             <div class="panel-body">
-                <table class="table table-hover">
+                <!-- 路径导航 -->
+                <ol class="breadcrumb">
+                    <li><a href="/admin/filer?path={{.config.Path}}"><i class="icon icon-home"></i> 根目录</a></li>
+                    {{if .parentPath}}
+                    <li><a href="/admin/filer?path={{.parentPath}}"><i class="icon icon-arrow-up"></i> 上级</a></li>
+                    {{end}}
+                    <li class="active">{{.path}}</li>
+                </ol>
+
+                <!-- 目录列表 -->
+                {{if .dirs}}
+                <h4><i class="icon icon-folder-open"></i> 子目录</h4>
+                <div class="row" style="margin-bottom: 20px;">
+                    {{range .dirs}}
+                    <div class="col-md-3 col-sm-4 col-xs-6">
+                        <a href="/admin/filer?path={{$.path}}{{.}}" class="btn btn-default btn-block" style="text-align: left; margin-bottom: 5px;">
+                            <i class="icon icon-folder-close text-warning"></i> {{.}}
+                        </a>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+
+                <!-- 文件列表 -->
+                <h4><i class="icon icon-file"></i> 文件</h4>
+                {{if .files}}
+                <table class="table table-hover table-striped">
                     <thead>
                         <tr>
-                            <th>文件名</th>
+                            <th style="width: 40%;">文件名</th>
+                            <th>预览</th>
                             <th>操作</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {{if .files}}
                         {{range .files}}
-                        <tr>
+                        <tr id="file-{{.}}">
                             <td>
-                                <i class="icon icon-file-image-o"></i> {{.}}
+                                <i class="icon icon-file-image-o file-icon text-primary"></i>
+                                {{.}}
                             </td>
                             <td>
-                                <a href="{{$.config.Domain}}{{$.config.Path}}{{$.path}}{{.}}" target="_blank" class="btn btn-xs btn-primary">
+                                <img src="{{$.config.Path}}{{$.path | trimSuffix "/"}}/{{.}}" style="max-height: 50px; max-width: 100px; border-radius: 3px;" onerror="this.style.display='none'">
+                            </td>
+                            <td>
+                                <a href="{{$.config.Domain}}{{$.config.Path}}{{$.path | trimSuffix "/"}}/{{.}}" target="_blank" class="btn btn-xs btn-primary">
                                     <i class="icon icon-eye-open"></i> 查看
                                 </a>
-                                <button class="btn btn-xs btn-danger delete-btn" data-url="{{$.config.Path}}{{$.path}}{{.}}">
+                                <a href="{{$.config.Path}}{{$.path | trimSuffix "/"}}/{{.}}" class="btn btn-xs btn-info copy-link" data-clipboard-text="{{$.config.Domain}}{{$.config.Path}}{{$.path | trimSuffix "/"}}/{{.}}">
+                                    <i class="icon icon-copy"></i> 复制
+                                </a>
+                                <button class="btn btn-xs btn-danger delete-btn" data-url="{{$.config.Path}}{{$.path | trimSuffix "/"}}/{{.}}">
                                     <i class="icon icon-trash"></i> 删除
                                 </button>
                             </td>
                         </tr>
                         {{end}}
-                        {{else}}
-                        <tr>
-                            <td colspan="2" class="text-center text-muted">暂无文件</td>
-                        </tr>
-                        {{end}}
                     </tbody>
                 </table>
+                {{else}}
+                <div class="alert alert-info">当前目录没有文件</div>
+                {{end}}
             </div>
         </div>
     </div>
 
     <script src="/public/static/zui/lib/jquery/jquery-3.6.4.min.js"></script>
     <script src="/public/static/zui/js/zui.min.js"></script>
+    <script src="/public/static/zui/lib/clipboard/clipboard.min.js"></script>
     <script>
+        // 复制链接
+        new Clipboard('.copy-link').on('success', function(e) {
+            new $.zui.Messager('复制成功', { type: 'success', icon: 'ok-sign' }).show();
+        });
+
+        // 删除文件
         $('.delete-btn').on('click', function() {
-            const url = $(this).data('url');
+            var url = $(this).data('url');
+            var $row = $(this).closest('tr');
             if (confirm('确认删除此文件？')) {
-                $.post('/admin/del', {
-                    url: url,
-                    mode: 'delete'
-                }, function(data) {
+                $.post('/admin/del', JSON.stringify({ url: url, mode: 'delete' }), function(data) {
                     if (data.code === 200) {
-                        new $.zui.Messager('删除成功', {
-                            type: 'success',
-                            icon: 'ok-sign'
-                        }).show();
-                        setTimeout(() => location.reload(), 1000);
+                        $row.fadeOut();
+                        new $.zui.Messager('删除成功', { type: 'success', icon: 'ok-sign' }).show();
                     } else {
-                        new $.zui.Messager('删除失败', {
-                            type: 'danger',
-                            icon: 'exclamation-sign'
-                        }).show();
+                        new $.zui.Messager('删除失败', { type: 'danger', icon: 'exclamation-sign' }).show();
                     }
                 });
             }
@@ -94,3 +128,4 @@
     </script>
 </body>
 </html>
+

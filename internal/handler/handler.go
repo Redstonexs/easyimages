@@ -576,21 +576,154 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 
 func Chart(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 统计信息
+		totalFiles := service.GetFileCount(cfg.Path + "*.*")
+		usedSpace := service.GetDirectorySize(cfg.Path)
+
+		// 获取最近30天的上传统计
+		dailyStats := make([]gin.H, 0, 30)
+		for i := 0; i < 30; i++ {
+			date := time.Now().AddDate(0, 0, -i)
+			datePath := date.Format("2006/01/02/")
+			count := service.GetFileCount(cfg.Path + datePath + "*.*")
+			dailyStats = append(dailyStats, gin.H{
+				"Date":  date.Format("01-02"),
+				"Count": count,
+			})
+		}
+
+		// 反转顺序（从旧到新）
+		for i, j := 0, len(dailyStats)-1; i < j; i, j = i+1, j-1 {
+			dailyStats[i], dailyStats[j] = dailyStats[j], dailyStats[i]
+		}
+
+		// 按格式统计
+		formatStats := make(map[string]int)
+		extensions := []string{"jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"}
+		for _, ext := range extensions {
+			count := service.GetFileCount(cfg.Path + "**/*." + ext)
+			if count > 0 {
+				formatStats[ext] = count
+			}
+		}
+
 		c.HTML(http.StatusOK, "admin_chart.html", gin.H{
-			"config": cfg,
+			"config":      cfg,
+			"totalFiles":  totalFiles,
+			"usedSpace":   usedSpace,
+			"dailyStats":  dailyStats,
+			"formatStats": formatStats,
 		})
+	}
+}
+
+// History 历史上传图片（原广场功能）
+func History(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		listDate := cfg.ListDate
+		datePath := c.DefaultQuery("date", time.Now().Format("2006/01/02/"))
+
+		// 限制日期范围
+		if datePath < time.Now().AddDate(0, 0, -listDate).Format("2006/01/02/") {
+			datePath = time.Now().Format("2006/01/02/")
+		}
+
+		search := c.Query("search")
+
+		// 获取文件列表
+		basePath := cfg.Path + datePath
+		if search != "" {
+			basePath += "*." + search
+		} else {
+			basePath += "*.*"
+		}
+
+		files := service.GetFileList(basePath, cfg.ShowSort)
+		allUpload := service.GetFileCount(cfg.Path + datePath)
+
+		// 生成日期链接数据
+		yesterday := time.Now().AddDate(0, 0, -1).Format("2006/01/02/")
+		dateLinks := make([]gin.H, 0, listDate)
+		for i := 2; i <= listDate; i++ {
+			date := time.Now().AddDate(0, 0, -i).Format("2006/01/02/")
+			dateLinks = append(dateLinks, gin.H{
+				"Date":  date,
+				"Label": fmt.Sprintf("%d天前", i),
+			})
+		}
+
+		c.HTML(http.StatusOK, "admin_history.html", gin.H{
+			"config":     cfg,
+			"files":      files,
+			"date":       datePath,
+			"allUpload":  allUpload,
+			"search":     search,
+			"listDate":   listDate,
+			"yesterday":  yesterday,
+			"dateLinks":  dateLinks,
+		})
+	}
+}
+
+// HistoryDelete 历史图片删除（支持POST表单）
+func HistoryDelete(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 支持POST表单
+		url := c.PostForm("url")
+		mode := c.DefaultPostForm("mode", "delete")
+
+		if url == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+			return
+		}
+
+		switch mode {
+		case "delete":
+			if err := service.DeleteFile(url); err != nil {
+				c.JSON(http.StatusOK, gin.H{"code": 404, "msg": "删除失败", "type": "danger", "icon": "exclamation-sign"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "删除成功", "type": "success", "icon": "ok-sign"})
+		case "recycle":
+			if err := service.MoveToRecycle(url, cfg); err != nil {
+				c.JSON(http.StatusOK, gin.H{"code": 404, "msg": "回收失败", "type": "danger", "icon": "exclamation-sign"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "回收成功", "type": "success", "icon": "ok-sign"})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "无效操作"})
+		}
 	}
 }
 
 func Filer(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		path := c.DefaultQuery("path", cfg.Path)
-		files := service.GetFileList(path+"*", cfg.ShowSort)
+		reqPath := c.DefaultQuery("path", cfg.Path)
+
+		// 确保路径以/结尾
+		if !strings.HasSuffix(reqPath, "/") {
+			reqPath += "/"
+		}
+
+		// 获取目录列表和文件列表
+		dirs := service.GetDirList("." + reqPath)
+		files := service.GetFileList("." + reqPath + "*.*", cfg.ShowSort)
+
+		// 计算上级目录
+		parentPath := ""
+		if reqPath != cfg.Path {
+			parentPath = filepath.Dir(strings.TrimSuffix(reqPath, "/"))
+			if !strings.HasSuffix(parentPath, "/") {
+				parentPath += "/"
+			}
+		}
 
 		c.HTML(http.StatusOK, "admin_filer.html", gin.H{
-			"config": cfg,
-			"files":  files,
-			"path":   path,
+			"config":     cfg,
+			"files":      files,
+			"dirs":       dirs,
+			"path":       reqPath,
+			"parentPath": parentPath,
 		})
 	}
 }
