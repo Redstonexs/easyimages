@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -321,7 +322,19 @@ func Download(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		filePath := filepath.Join(".", dw)
+		// 验证路径安全性，防止路径遍历攻击
+		if strings.Contains(dw, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			return
+		}
+
+		// 确保路径在允许的目录下
+		if !strings.HasPrefix(dw, cfg.Path) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			return
+		}
+
+		filePath := filepath.Join(".", filepath.Clean(dw))
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 			return
@@ -365,7 +378,19 @@ func HideImage(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		filePath := filepath.Join(".", path)
+		// 验证路径安全性，防止路径遍历攻击
+		if strings.Contains(path, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			return
+		}
+
+		// 确保路径在允许的目录下
+		if !strings.HasPrefix(path, cfg.Path) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
+			return
+		}
+
+		filePath := filepath.Join(".", filepath.Clean(path))
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 			return

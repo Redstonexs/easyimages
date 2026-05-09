@@ -296,7 +296,14 @@ func FormatSize(bytes int64) string {
 // DeleteFile 删除文件
 func DeleteFile(path string) error {
 	cfg := config.Get()
-	fullPath := filepath.Join(".", strings.TrimPrefix(path, cfg.Domain))
+	cleanedPath := strings.TrimPrefix(path, cfg.Domain)
+
+	// 验证路径安全性
+	if err := validatePath(cleanedPath, cfg.Path); err != nil {
+		return err
+	}
+
+	fullPath := filepath.Join(".", filepath.Clean(cleanedPath))
 	return os.Remove(fullPath)
 }
 
@@ -306,9 +313,14 @@ func MoveToRecycle(path string, cfg *config.Config) error {
 	relPath := strings.TrimPrefix(path, cfg.Domain)
 	relPath = strings.TrimPrefix(relPath, cfg.Path)
 
+	// 验证相对路径安全性
+	if strings.Contains(relPath, "..") {
+		return fmt.Errorf("invalid path: contains path traversal")
+	}
+
 	// 构建源路径和目标路径
-	srcPath := filepath.Join(".", cfg.Path, relPath)
-	fileName := strings.ReplaceAll(relPath, "/", "_")
+	srcPath := filepath.Join(".", cfg.Path, filepath.Clean(relPath))
+	fileName := sanitizeFilename(strings.ReplaceAll(relPath, "/", "_"))
 	dstPath := filepath.Join(".", cfg.Path, "recycle", fileName)
 
 	// 创建回收站目录
@@ -319,10 +331,15 @@ func MoveToRecycle(path string, cfg *config.Config) error {
 
 // RestoreFromRecycle 从回收站恢复
 func RestoreFromRecycle(name string, cfg *config.Config) error {
+	// 验证文件名安全性
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("invalid filename: contains path traversal")
+	}
+
 	// 还原路径
 	relPath := strings.ReplaceAll(name, "_", "/")
-	srcPath := filepath.Join(".", cfg.Path, "recycle", name)
-	dstPath := filepath.Join(".", cfg.Path, relPath)
+	srcPath := filepath.Join(".", cfg.Path, "recycle", filepath.Clean(name))
+	dstPath := filepath.Join(".", cfg.Path, filepath.Clean(relPath))
 
 	// 创建目标目录
 	os.MkdirAll(filepath.Dir(dstPath), 0755)
@@ -332,12 +349,23 @@ func RestoreFromRecycle(name string, cfg *config.Config) error {
 
 // DeleteDirectory 删除目录
 func DeleteDirectory(path string) error {
-	return os.RemoveAll(path)
+	// 验证路径安全性
+	cfg := config.Get()
+	if err := validatePath(path, cfg.Path); err != nil {
+		return err
+	}
+
+	return os.RemoveAll(filepath.Join(".", filepath.Clean(path)))
 }
 
 // GetImageInfo 获取图片信息
 func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error) {
-	filePath := filepath.Join(".", img)
+	// 验证路径安全性
+	if err := validatePath(img, cfg.Path); err != nil {
+		return nil, err
+	}
+
+	filePath := filepath.Join(".", filepath.Clean(img))
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return nil, err
@@ -354,13 +382,18 @@ func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error
 
 // GenerateThumbnail 生成缩略图
 func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
+	// 验证路径安全性，防止路径遍历攻击
+	if err := validatePath(img, cfg.Path); err != nil {
+		return "", err
+	}
+
 	// 缓存目录
 	cacheDir := filepath.Join(".", cfg.Path, "cache")
 	os.MkdirAll(cacheDir, 0755)
 
-	// 缩略图文件名
+	// 缩略图文件名 - 使用安全的文件名
 	relPath := strings.TrimPrefix(img, cfg.Path)
-	thumbName := strings.ReplaceAll(relPath, "/", "_")
+	thumbName := sanitizeFilename(strings.ReplaceAll(relPath, "/", "_"))
 	thumbPath := filepath.Join(cacheDir, thumbName)
 
 	// 检查缓存是否存在
@@ -370,7 +403,7 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 
 	// 这里应该实现实际的缩略图生成逻辑
 	// 暂时返回原图
-	srcPath := filepath.Join(".", img)
+	srcPath := filepath.Join(".", filepath.Clean(img))
 	if _, err := os.Stat(srcPath); err != nil {
 		return "", err
 	}
@@ -390,6 +423,38 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 
 	_, err = io.Copy(dst, src)
 	return thumbPath, err
+}
+
+// validatePath 验证路径安全性，防止路径遍历攻击
+func validatePath(path, allowedPrefix string) error {
+	// 清理路径
+	cleaned := filepath.Clean(path)
+
+	// 检查是否包含路径遍历组件
+	if strings.Contains(cleaned, "..") {
+		return fmt.Errorf("invalid path: contains path traversal")
+	}
+
+	// 确保路径在允许的目录下
+	if !strings.HasPrefix(cleaned, allowedPrefix) {
+		return fmt.Errorf("invalid path: outside allowed directory")
+	}
+
+	return nil
+}
+
+// sanitizeFilename 清理文件名，移除危险字符
+func sanitizeFilename(name string) string	{
+	// 只保留字母、数字、下划线、连字符和点
+	var result strings.Builder
+	for _, c := range name {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' {
+			result.WriteRune(c)
+		} else {
+			result.WriteRune('_')
+		}
+	}
+	return result.String()
 }
 
 // WriteUploadLog 写入上传日志
