@@ -526,13 +526,16 @@ func ConvertToWebP(imgPath string, cfg *config.Config) error {
 	// 生成webp存储路径
 	// 原始路径如: ./i/2026/05/08/xxx.jpg
 	// webp路径如: ./i/webp/2026/05/08/xxx.webp
-	relPath, err := filepath.Rel(".", imgPath)
-	if err != nil {
-		return err
+	// 不能用 filepath.Rel(".", imgPath)，因为结果会是 "i/2026/05/08/xxx.jpg"（带 i/ 前缀），
+	// 导致 webp 路径变成 ./i/webp/i/2026/05/08/xxx.webp（双层 i/）。
+	fsPrefix := "." + cfg.Path // "./i/"
+	relToStorage := strings.TrimPrefix(imgPath, fsPrefix)
+	if relToStorage == imgPath {
+		return fmt.Errorf("image path %q is not under storage path %q", imgPath, fsPrefix)
 	}
 
-	webpDir := filepath.Join(".", cfg.Path, "webp")
-	webpPath := filepath.Join(webpDir, strings.TrimSuffix(relPath, filepath.Ext(relPath))+".webp")
+	webpDir := filepath.Join(fsPrefix, "webp")
+	webpPath := filepath.Join(webpDir, strings.TrimSuffix(relToStorage, filepath.Ext(relToStorage))+".webp")
 
 	// 确保目录存在
 	if err := os.MkdirAll(filepath.Dir(webpPath), 0755); err != nil {
