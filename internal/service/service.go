@@ -298,13 +298,13 @@ func DeleteFile(path string) error {
 	cfg := config.Get()
 	cleanedPath := strings.TrimPrefix(path, cfg.Domain)
 
-	// 验证路径安全性
-	if err := validatePath(cleanedPath, cfg.Path); err != nil {
+	// 验证并获取安全路径
+	safePath, err := getSafePath(cleanedPath)
+	if err != nil {
 		return err
 	}
 
-	fullPath := filepath.Join(".", filepath.Clean(cleanedPath))
-	return os.Remove(fullPath)
+	return os.Remove(safePath)
 }
 
 // MoveToRecycle 移动到回收站
@@ -318,15 +318,20 @@ func MoveToRecycle(path string, cfg *config.Config) error {
 		return fmt.Errorf("invalid path: contains path traversal")
 	}
 
-	// 构建源路径和目标路径
-	srcPath := filepath.Join(".", cfg.Path, filepath.Clean(relPath))
+	// 构建源路径 - 使用getSafePath验证
+	safeSrcPath, err := getSafePath(cfg.Path + relPath)
+	if err != nil {
+		return err
+	}
+
+	// 构建目标路径 - 使用安全文件名
 	fileName := sanitizeFilename(strings.ReplaceAll(relPath, "/", "_"))
 	dstPath := filepath.Join(".", cfg.Path, "recycle", fileName)
 
 	// 创建回收站目录
 	os.MkdirAll(filepath.Join(".", cfg.Path, "recycle"), 0755)
 
-	return os.Rename(srcPath, dstPath)
+	return os.Rename(safeSrcPath, dstPath)
 }
 
 // RestoreFromRecycle 从回收站恢复
@@ -338,13 +343,20 @@ func RestoreFromRecycle(name string, cfg *config.Config) error {
 
 	// 还原路径
 	relPath := strings.ReplaceAll(name, "_", "/")
+
+	// 构建源路径 - 回收站中的文件
 	srcPath := filepath.Join(".", cfg.Path, "recycle", filepath.Clean(name))
-	dstPath := filepath.Join(".", cfg.Path, filepath.Clean(relPath))
+
+	// 构建目标路径 - 使用getSafePath验证
+	safeDstPath, err := getSafePath(cfg.Path + relPath)
+	if err != nil {
+		return err
+	}
 
 	// 创建目标目录
-	os.MkdirAll(filepath.Dir(dstPath), 0755)
+	os.MkdirAll(filepath.Dir(safeDstPath), 0755)
 
-	return os.Rename(srcPath, dstPath)
+	return os.Rename(srcPath, safeDstPath)
 }
 
 // DeleteDirectory 删除目录
@@ -382,8 +394,9 @@ func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error
 
 // GenerateThumbnail 生成缩略图
 func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
-	// 验证路径安全性，防止路径遍历攻击
-	if err := validatePath(img, cfg.Path); err != nil {
+	// 验证并获取安全路径
+	safeSrcPath, err := getSafePath(img)
+	if err != nil {
 		return "", err
 	}
 
@@ -403,13 +416,12 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 
 	// 这里应该实现实际的缩略图生成逻辑
 	// 暂时返回原图
-	srcPath := filepath.Join(".", filepath.Clean(img))
-	if _, err := os.Stat(srcPath); err != nil {
+	if _, err := os.Stat(safeSrcPath); err != nil {
 		return "", err
 	}
 
 	// 复制文件作为临时方案
-	src, err := os.Open(srcPath)
+	src, err := os.Open(safeSrcPath)
 	if err != nil {
 		return "", err
 	}

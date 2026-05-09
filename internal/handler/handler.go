@@ -334,13 +334,14 @@ func Download(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		filePath := filepath.Join(".", filepath.Clean(dw))
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// 使用验证后的安全路径
+		safePath := filepath.Join(".", filepath.Clean(dw))
+		if _, err := os.Stat(safePath); os.IsNotExist(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 			return
 		}
 
-		c.FileAttachment(filePath, filepath.Base(filePath))
+		c.FileAttachment(safePath, filepath.Base(safePath))
 	}
 }
 
@@ -390,13 +391,14 @@ func HideImage(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		filePath := filepath.Join(".", filepath.Clean(path))
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// 使用验证后的安全路径
+		safePath := filepath.Join(".", filepath.Clean(path))
+		if _, err := os.Stat(safePath); os.IsNotExist(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 			return
 		}
 
-		c.File(filePath)
+		c.File(safePath)
 	}
 }
 
