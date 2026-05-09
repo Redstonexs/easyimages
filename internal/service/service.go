@@ -349,24 +349,24 @@ func RestoreFromRecycle(name string, cfg *config.Config) error {
 
 // DeleteDirectory 删除目录
 func DeleteDirectory(path string) error {
-	// 验证路径安全性
-	cfg := config.Get()
-	if err := validatePath(path, cfg.Path); err != nil {
+	// 验证并获取安全路径
+	safePath, err := getSafePath(path)
+	if err != nil {
 		return err
 	}
 
-	return os.RemoveAll(filepath.Join(".", filepath.Clean(path)))
+	return os.RemoveAll(safePath)
 }
 
 // GetImageInfo 获取图片信息
 func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error) {
-	// 验证路径安全性
-	if err := validatePath(img, cfg.Path); err != nil {
+	// 验证并获取安全路径
+	safePath, err := getSafePath(img)
+	if err != nil {
 		return nil, err
 	}
 
-	filePath := filepath.Join(".", filepath.Clean(img))
-	info, err := os.Stat(filePath)
+	info, err := os.Stat(safePath)
 	if err != nil {
 		return nil, err
 	}
@@ -441,6 +441,28 @@ func validatePath(path, allowedPrefix string) error {
 	}
 
 	return nil
+}
+
+// getSafePath 验证路径并返回安全的绝对路径
+// 此函数用于替代直接使用用户输入构建路径
+func getSafePath(userPath string) (string, error) {
+	cfg := config.Get()
+
+	// 清理路径
+	cleaned := filepath.Clean(userPath)
+
+	// 检查是否包含路径遍历组件
+	if strings.Contains(cleaned, "..") {
+		return "", fmt.Errorf("invalid path: contains path traversal")
+	}
+
+	// 确保路径在允许的目录下
+	if !strings.HasPrefix(cleaned, cfg.Path) {
+		return "", fmt.Errorf("invalid path: outside allowed directory")
+	}
+
+	// 返回安全的绝对路径
+	return filepath.Join(".", cleaned), nil
 }
 
 // sanitizeFilename 清理文件名，移除危险字符
