@@ -134,10 +134,6 @@ func main() {
 	imgRoutePath := strings.TrimRight(cfg.Path, "/")
 	r.Static(imgRoutePath, "."+cfg.Path)
 
-	// WebP图片静态文件服务
-	webpRoutePath := imgRoutePath + "/webp"
-	r.Static(webpRoutePath, "."+cfg.Path+"/webp")
-
 	// favicon
 	r.StaticFile("/favicon.ico", "./public/images/favicon.ico")
 

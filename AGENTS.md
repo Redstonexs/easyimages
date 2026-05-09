@@ -46,7 +46,7 @@ Docker build uses `CGO_ENABLED=0` — keep it that way.
 - WebP files stored in `i/webp/` mirroring original directory structure (e.g., `./i/webp/2026/05/08/xxx.webp`)
 - WebP URLs returned in upload response as `webp_url` field
 - Skips already-webp files and animated GIFs
-- WebP static route: `/i/webp/...` maps to `./i/webp/...`
+- WebP files are served by the existing `/i` static route (e.g., `/i/webp/2026/05/08/xxx.webp`)
 
 ## Admin routes
 
