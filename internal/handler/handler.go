@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -227,7 +228,10 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 
 		// 保存分片
 		chunkDir := filepath.Join(".", cfg.Path, "chunks", uploadId)
-		os.MkdirAll(chunkDir, 0755)
+		if err := os.MkdirAll(chunkDir, 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建分片目录失败"})
+			return
+		}
 		chunkPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", chunkIndex))
 		if err := c.SaveUploadedFile(chunk, chunkPath); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "保存分片失败"})
@@ -259,7 +263,11 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 		storagePath = strings.Replace(storagePath, "m", fmt.Sprintf("%02d", now.Month()), 1)
 		storagePath = strings.Replace(storagePath, "d", fmt.Sprintf("%02d", now.Day()), 1)
 		uploadDir := filepath.Join(".", cfg.Path, storagePath)
-		os.MkdirAll(uploadDir, 0755)
+		if err := os.MkdirAll(uploadDir, 0755); err != nil {
+			os.RemoveAll(chunkDir)
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建存储目录失败"})
+			return
+		}
 		finalPath := filepath.Join(uploadDir, newFileName)
 
 		// 合并分片到目标文件
@@ -280,8 +288,15 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": fmt.Sprintf("缺少分片 %d", i)})
 				return
 			}
-			n, _ := io.Copy(outFile, partFile)
+			n, err := io.Copy(outFile, partFile)
 			partFile.Close()
+			if err != nil {
+				outFile.Close()
+				os.Remove(finalPath)
+				os.RemoveAll(chunkDir)
+				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": fmt.Sprintf("合并分片 %d 失败: %v", i, err)})
+				return
+			}
 			totalSize += n
 		}
 		outFile.Close()
@@ -674,7 +689,13 @@ func InstallAction(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		// 创建安装锁
-		os.WriteFile("config/install.lock", []byte("installed"), 0644)
+		if err := os.WriteFile("config/install.lock", []byte("installed"), 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"result":  "failed",
+				"message": "创建安装锁失败: " + err.Error(),
+			})
+			return
+		}
 
 		c.Redirect(http.StatusFound, "/")
 	}
@@ -881,9 +902,7 @@ func Chart(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		// 反转顺序（从旧到新）
-		for i, j := 0, len(dailyStats)-1; i < j; i, j = i+1, j-1 {
-			dailyStats[i], dailyStats[j] = dailyStats[j], dailyStats[i]
-		}
+		slices.Reverse(dailyStats)
 
 		c.HTML(http.StatusOK, "admin_chart.html", gin.H{
 			"config":      cfg,
@@ -1276,6 +1295,9 @@ func AdminDelete(cfg *config.Config) gin.HandlerFunc {
 
 func init() {
 	// 设置时区
-	loc, _ := time.LoadLocation("Asia/Shanghai")
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.UTC
+	}
 	time.Local = loc
 }

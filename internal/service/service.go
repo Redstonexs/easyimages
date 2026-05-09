@@ -11,9 +11,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -268,7 +270,11 @@ func GenerateFileName(source string, imgName string) string {
 		return generateUUID()
 	default:
 		// default: 时间+随机数转36进制
-		randNum, _ := rand.Int(rand.Reader, big.NewInt(9000))
+		randNum, err := rand.Int(rand.Reader, big.NewInt(9000))
+		if err != nil {
+			// crypto/rand 失败时降级为仅时间戳
+			return time.Now().Format("150405070405")
+		}
 		return fmt.Sprintf("%s%04d", time.Now().Format("150405"), randNum.Int64()+1000)
 	}
 }
@@ -376,9 +382,7 @@ func GetFileList(pattern string, sortOrder int) []string {
 	}
 
 	if sortOrder == 1 {
-		for i, j := 0, len(files)-1; i < j; i, j = i+1, j-1 {
-			files[i], files[j] = files[j], files[i]
-		}
+		slices.Reverse(files)
 	}
 
 	return files
@@ -634,7 +638,9 @@ func MoveToRecycle(path string, cfg *config.Config) error {
 	dstPath := filepath.Join(".", cfg.Path, "recycle", fileName)
 
 	// 创建回收站目录
-	os.MkdirAll(filepath.Join(".", cfg.Path, "recycle"), 0755)
+	if err := os.MkdirAll(filepath.Join(".", cfg.Path, "recycle"), 0755); err != nil {
+		return fmt.Errorf("failed to create recycle directory: %w", err)
+	}
 
 	return os.Rename(safeSrcPath, dstPath)
 }
@@ -659,7 +665,9 @@ func RestoreFromRecycle(name string, cfg *config.Config) error {
 	}
 
 	// 创建目标目录
-	os.MkdirAll(filepath.Dir(safeDstPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(safeDstPath), 0755); err != nil {
+		return fmt.Errorf("failed to create restore directory: %w", err)
+	}
 
 	return os.Rename(srcPath, safeDstPath)
 }
@@ -708,7 +716,9 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 	// 缓存目录
 	baseDir, _ := filepath.Abs(filepath.Join(".", cfg.Path))
 	cacheDir := filepath.Join(baseDir, "cache")
-	os.MkdirAll(cacheDir, 0755)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create cache directory: %w", err)
+	}
 
 	// 缩略图文件名 - 使用安全的文件名
 	relFromBase, _ := filepath.Rel(baseDir, cleanPath)
@@ -839,13 +849,18 @@ func flushUploadLogLocked() {
 	}
 
 	logDir := "admin/logs/upload"
-	os.MkdirAll(logDir, 0755)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Printf("[UploadLog] 创建日志目录失败: %v", err)
+		return
+	}
 	logFile := filepath.Join(logDir, uploadLogMonth+".json")
 
 	// 读取现有日志
 	logs := make(map[string]interface{})
 	if data, err := os.ReadFile(logFile); err == nil {
-		json.Unmarshal(data, &logs)
+		if err := json.Unmarshal(data, &logs); err != nil {
+			log.Printf("[UploadLog] 解析日志文件失败 %s: %v，将覆盖", logFile, err)
+		}
 	}
 
 	// 合并缓冲中的条目
@@ -854,8 +869,15 @@ func flushUploadLogLocked() {
 	}
 
 	// 写入
-	data, _ := json.MarshalIndent(logs, "", "  ")
-	os.WriteFile(logFile, data, 0644)
+	data, err := json.MarshalIndent(logs, "", "  ")
+	if err != nil {
+		log.Printf("[UploadLog] 序列化日志失败: %v", err)
+		return
+	}
+	if err := os.WriteFile(logFile, data, 0644); err != nil {
+		log.Printf("[UploadLog] 写入日志文件失败 %s: %v", logFile, err)
+		return
+	}
 	uploadLogBuf = nil
 }
 
@@ -934,7 +956,9 @@ func loadIPCounts(day string) {
 	logFile := filepath.Join(logDir, day+".json")
 	counts := make(map[string]int)
 	if data, err := os.ReadFile(logFile); err == nil {
-		json.Unmarshal(data, &counts)
+		if err := json.Unmarshal(data, &counts); err != nil {
+			log.Printf("[IPCount] 解析IP计数文件失败 %s: %v", logFile, err)
+		}
 	}
 	ipCountCache[day] = counts
 }
@@ -945,14 +969,24 @@ func flushIPCountsLocked() {
 		return
 	}
 	logDir := "admin/logs/ipcounts"
-	os.MkdirAll(logDir, 0755)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Printf("[IPCount] 创建日志目录失败: %v", err)
+		return
+	}
 	logFile := filepath.Join(logDir, ipCountCacheDay+".json")
 	counts := ipCountCache[ipCountCacheDay]
 	if counts == nil {
 		counts = make(map[string]int)
 	}
-	data, _ := json.MarshalIndent(counts, "", "  ")
-	os.WriteFile(logFile, data, 0644)
+	data, err := json.MarshalIndent(counts, "", "  ")
+	if err != nil {
+		log.Printf("[IPCount] 序列化IP计数失败: %v", err)
+		return
+	}
+	if err := os.WriteFile(logFile, data, 0644); err != nil {
+		log.Printf("[IPCount] 写入IP计数文件失败 %s: %v", logFile, err)
+		return
+	}
 	ipCountDirty = false
 }
 

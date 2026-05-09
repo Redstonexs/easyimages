@@ -202,8 +202,8 @@ func Get() *Config {
 }
 
 func LoadGuestConfig() (map[string]*GuestConfig, error) {
-	configMu.RLock()
-	defer configMu.RUnlock()
+	configMu.Lock()
+	defer configMu.Unlock()
 
 	if guestConfig != nil {
 		return guestConfig, nil
@@ -228,13 +228,15 @@ func SaveGuestConfig(gc map[string]*GuestConfig) error {
 	if err != nil {
 		return err
 	}
+	configMu.Lock()
 	guestConfig = gc
+	configMu.Unlock()
 	return os.WriteFile("config/config.guest.json", data, 0644)
 }
 
 func LoadAPIKeys() (map[string]*APIKey, error) {
-	configMu.RLock()
-	defer configMu.RUnlock()
+	configMu.Lock()
+	defer configMu.Unlock()
 
 	if apiKeys != nil {
 		return apiKeys, nil
@@ -259,7 +261,9 @@ func SaveAPIKeys(ak map[string]*APIKey) error {
 	if err != nil {
 		return err
 	}
+	configMu.Lock()
 	apiKeys = ak
+	configMu.Unlock()
 	return os.WriteFile("config/api_key.json", data, 0644)
 }
 

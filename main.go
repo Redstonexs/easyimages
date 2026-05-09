@@ -29,13 +29,13 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// 创建必要目录
+	// 创建必要目录（cfg.Path 是 URL 路径如 "/i/"，文件系统路径需要 "." 前缀）
 	dirs := []string{
-		cfg.Path,
-		cfg.Path + "/cache",
-		cfg.Path + "/suspic",
-		cfg.Path + "/recycle",
-		cfg.Path + "/webp",
+		"." + cfg.Path,
+		"." + cfg.Path + "/cache",
+		"." + cfg.Path + "/suspic",
+		"." + cfg.Path + "/recycle",
+		"." + cfg.Path + "/webp",
 		"admin/logs/upload",
 		"admin/logs/ipcounts",
 	}

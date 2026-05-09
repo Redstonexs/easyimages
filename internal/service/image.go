@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -307,7 +308,9 @@ func CompressImage(imgPath string, quality int) error {
 		encoder := png.Encoder{CompressionLevel: png.BestCompression}
 		err = encoder.Encode(out, img)
 	default:
-		// 其他格式不压缩
+		// 其他格式不压缩，清理临时文件
+		out.Close()
+		os.Remove(tmpPath)
 		return nil
 	}
 
@@ -494,22 +497,32 @@ func ProcessImageAfterUpload(filePath string, cfg *config.Config) {
 
 	// 压缩
 	if cfg.Compress == 1 {
-		CompressImage(filePath, cfg.CompressRatio)
+		if err := CompressImage(filePath, cfg.CompressRatio); err != nil {
+			log.Printf("[PostProcess] 压缩失败 %s: %v", filePath, err)
+		}
 	}
 
 	// 水印
 	if cfg.Watermark > 0 {
-		AddWatermark(filePath, cfg)
+		if err := AddWatermark(filePath, cfg); err != nil {
+			log.Printf("[PostProcess] 水印失败 %s: %v", filePath, err)
+		}
 	}
 
-	// 格式转换
+	// 格式转换（可能改变文件路径和扩展名）
 	if cfg.ImgConvert != "" {
-		ConvertImage(filePath, cfg.ImgConvert)
+		if newPath, err := ConvertImage(filePath, cfg.ImgConvert); err != nil {
+			log.Printf("[PostProcess] 格式转换失败 %s: %v", filePath, err)
+		} else if newPath != "" {
+			filePath = newPath
+		}
 	}
 
 	// WebP转换
 	if cfg.WebpConvert == 1 {
-		ConvertToWebP(filePath, cfg)
+		if err := ConvertToWebP(filePath, cfg); err != nil {
+			log.Printf("[PostProcess] WebP转换失败 %s: %v", filePath, err)
+		}
 	}
 }
 
@@ -607,13 +620,7 @@ func GetAllowedExtensions(cfg *config.Config) []string {
 // IsAllowedExtension 检查扩展名是否允许
 func IsAllowedExtension(filename string, cfg *config.Config) bool {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
-	allowed := GetAllowedExtensions(cfg)
-	for _, a := range allowed {
-		if a == ext {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(GetAllowedExtensions(cfg), ext)
 }
 
 // CheckSVGSecurity 检查SVG安全性，防止XSS攻击
@@ -650,15 +657,7 @@ func CheckSVGSecurity(path string) bool {
 		[]byte("<animate"),
 	}
 
-	for _, pattern := range dangerousPatterns {
-		if bytes.Contains(lower, pattern) {
-			return false
-		}
-	}
-
-	return true
-}
-
-func init() {
-	// 导入crypto/sha256
+	return !slices.ContainsFunc(dangerousPatterns, func(pattern []byte) bool {
+		return bytes.Contains(lower, pattern)
+	})
 }
