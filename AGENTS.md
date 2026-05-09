@@ -40,6 +40,24 @@ Docker build uses `CGO_ENABLED=0` — keep it that way.
 - Password hashing: new passwords use bcrypt (`service.HashPassword`), legacy PHP passwords use SHA256 (`legacy_password.go`). Both are checked in `ValidateLogin`.
 - Auth is cookie-based (`auth` cookie with JSON-encoded `[user, password]`).
 
+## WebP conversion
+
+- Controlled by `webp_convert` (0/1) and `webp_quality` (default 80) in config
+- WebP files stored in `i/webp/` mirroring original directory structure (e.g., `./i/webp/2026/05/08/xxx.webp`)
+- WebP URLs returned in upload response as `webp_url` field
+- Skips already-webp files and animated GIFs
+- WebP static route: `/i/webp/...` maps to `./i/webp/...`
+
+## Admin routes
+
+- `/admin/index` — login page
+- `/admin/manager` — config management
+- `/admin/chart` — statistics
+- `/admin/history` — upload history
+- `/admin/urllist` — image URL list with pagination and WebP URLs
+- `/admin/filer` — file management
+- `/api/urllist` — JSON API for image URL list
+
 ## Gotchas
 
 - Template files must be UTF-8 without BOM. Corrupted encoding causes blank pages (silent template parse failure).
@@ -50,4 +68,4 @@ Docker build uses `CGO_ENABLED=0` — keep it that way.
 
 ## File count
 
-~5 Go source files, 10 HTML templates, no tests.
+~8 Go source files, 11 HTML templates, no tests.
