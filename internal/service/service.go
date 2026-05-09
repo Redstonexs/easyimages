@@ -95,17 +95,17 @@ func HashPassword(password string) string {
 }
 
 // CheckPassword 检查密码是否匹配
-// 支持bcrypt和SHA256（向后兼容PHP版本）
+// 优先使用bcrypt验证，如果失败则尝试旧格式验证
 func CheckPassword(password, hashedPassword string) bool {
-	// 尝试bcrypt验证
+	// 优先使用bcrypt验证（安全）
 	if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password)); err == nil {
 		return true
 	}
 
-	// 向后兼容：尝试SHA256验证（PHP版本使用的格式）
-	sha256Hash := sha256.Sum256([]byte(password))
-	sha256HashStr := hex.EncodeToString(sha256Hash[:])
-	return sha256HashStr == hashedPassword
+	// 旧格式验证：用于兼容从PHP版本迁移的密码
+	// 使用LegacyPasswordHasher进行验证
+	legacyHasher := NewLegacyPasswordHasher()
+	return legacyHasher.VerifyHash(password, hashedPassword)
 }
 
 // GenerateFileName 生成文件名
