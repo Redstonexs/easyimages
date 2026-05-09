@@ -212,6 +212,11 @@ func DecryptHideKey(key string, hideKey string) (string, error) {
 
 // GetFileList 获取文件列表
 func GetFileList(pattern string, sortOrder int) []string {
+	// 验证模式字符串安全性
+	if err := validateGlobPattern(pattern); err != nil {
+		return nil
+	}
+
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return nil
@@ -219,6 +224,10 @@ func GetFileList(pattern string, sortOrder int) []string {
 
 	var files []string
 	for _, match := range matches {
+		// 验证匹配的文件路径
+		if err := validateMatchedPath(match); err != nil {
+			continue
+		}
 		info, err := os.Stat(match)
 		if err != nil {
 			continue
@@ -240,6 +249,11 @@ func GetFileList(pattern string, sortOrder int) []string {
 
 // GetFileCount 获取文件数量
 func GetFileCount(pattern string) int {
+	// 验证模式字符串安全性
+	if err := validateGlobPattern(pattern); err != nil {
+		return 0
+	}
+
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return 0
@@ -247,6 +261,10 @@ func GetFileCount(pattern string) int {
 
 	count := 0
 	for _, match := range matches {
+		// 验证匹配的文件路径
+		if err := validateMatchedPath(match); err != nil {
+			continue
+		}
 		info, err := os.Stat(match)
 		if err != nil {
 			continue
@@ -256,6 +274,24 @@ func GetFileCount(pattern string) int {
 		}
 	}
 	return count
+}
+
+// validateGlobPattern 验证glob模式字符串安全性
+func validateGlobPattern(pattern string) error {
+	// 检查是否包含路径遍历组件
+	if strings.Contains(pattern, "..") {
+		return fmt.Errorf("invalid pattern: contains path traversal")
+	}
+	return nil
+}
+
+// validateMatchedPath 验证匹配的文件路径安全性
+func validateMatchedPath(path string) error {
+	// 检查是否包含路径遍历组件
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("invalid path: contains path traversal")
+	}
+	return nil
 }
 
 // GetDirectorySize 获取目录大小
