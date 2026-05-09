@@ -12,6 +12,7 @@ import (
 	"io"
 	"mime/multipart"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -347,13 +348,23 @@ func CropImage(imgPath string, width, height int) error {
 
 // ConvertImage 转换图片格式
 func ConvertImage(imgPath, format string) (string, error) {
+	// 新文件路径
+	newPath := strings.TrimSuffix(imgPath, filepath.Ext(imgPath)) + "." + format
+
+	if format == "webp" {
+		// WebP 需要使用 cwebp CLI 编码（imaging 库不支持 WebP 编码）
+		cmd := exec.Command("cwebp", "-q", "90", imgPath, "-o", newPath)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("webp convert failed: %v (output: %s)", err, string(output))
+		}
+		return newPath, nil
+	}
+
 	img, err := imaging.Open(imgPath)
 	if err != nil {
 		return "", err
 	}
-
-	// 新文件路径
-	newPath := strings.TrimSuffix(imgPath, filepath.Ext(imgPath)) + "." + format
 
 	// 保存为新格式
 	switch format {
@@ -361,8 +372,6 @@ func ConvertImage(imgPath, format string) (string, error) {
 		err = imaging.Save(img, newPath, imaging.JPEGQuality(90))
 	case "png":
 		err = imaging.Save(img, newPath, imaging.PNGCompressionLevel(png.BestCompression))
-	case "webp":
-		err = imaging.Save(img, newPath, imaging.JPEGQuality(90))
 	default:
 		return "", fmt.Errorf("unsupported format: %s", format)
 	}
@@ -499,6 +508,8 @@ func ProcessImageAfterUpload(filePath string, cfg *config.Config) {
 }
 
 // ConvertToWebP 将图片转换为WebP格式并存储到独立文件夹
+// 使用 cwebp CLI 工具进行编码（Go 生态无纯 Go WebP 编码器，golang.org/x/image/webp 仅支持解码）。
+// 如果 cwebp 不可用，静默跳过（日志提示）。
 func ConvertToWebP(imgPath string, cfg *config.Config) error {
 	// 跳过已经是webp的文件
 	ext := strings.ToLower(filepath.Ext(imgPath))
@@ -509,12 +520,6 @@ func ConvertToWebP(imgPath string, cfg *config.Config) error {
 	// 跳过动态图片（gif）
 	if ext == ".gif" && IsGifAnimated(imgPath) {
 		return nil
-	}
-
-	// 打开图片
-	img, err := imaging.Open(imgPath)
-	if err != nil {
-		return err
 	}
 
 	// 生成webp存储路径
@@ -533,12 +538,22 @@ func ConvertToWebP(imgPath string, cfg *config.Config) error {
 		return err
 	}
 
-	// 保存为webp格式
 	quality := cfg.WebpQuality
 	if quality == 0 {
 		quality = 80
 	}
-	return imaging.Save(img, webpPath, imaging.JPEGQuality(quality))
+
+	// 使用 cwebp 命令行工具转换（Go 标准库和 x/image 均无 WebP 编码器）
+	// cwebp -q <quality> input -o output
+	cmd := exec.Command("cwebp", "-q", fmt.Sprintf("%d", quality), imgPath, "-o", webpPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// cwebp 未安装或转换失败，记录日志但不中断流程
+		fmt.Printf("[WebP] 转换失败 %s: %v (output: %s)\n", imgPath, err, string(output))
+		return err
+	}
+
+	return nil
 }
 
 // GetWebPURL 获取图片的WebP版本URL

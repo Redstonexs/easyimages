@@ -24,10 +24,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o easyimage .
 # 最终镜像
 FROM alpine:latest
 
-# 安装运行时依赖
+# 安装运行时依赖（libwebp-tools 提供 cwebp 命令，用于 WebP 编码）
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
+    libwebp-tools \
     && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone
 
