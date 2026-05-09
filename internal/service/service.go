@@ -258,7 +258,8 @@ func ValidateLogin(user, password string, cfg *config.Config) (bool, string) {
 func GenerateFileName(source string, imgName string) string {
 	switch imgName {
 	case "source":
-		return source
+		// source 模式使用原始文件名，但必须清理路径分隔符防止目录穿越
+		return sanitizeFilename(source)
 	case "date":
 		return time.Now().Format("150405")
 	case "unix":
@@ -756,6 +757,20 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 	// 保存缩略图
 	err = imaging.Save(thumbImg, thumbPath)
 	return thumbPath, err
+}
+
+// ValidateURLPath 验证 URL 路径参数的安全性。
+// 必须在使用用户提供的路径参数前调用（Download、Filer、ImageURLList 等 handler）。
+// filepath.Clean 规范化路径（处理 Windows 反斜杠、多余的 / 和 .），防止 "..\" 绕过。
+func ValidateURLPath(path, requiredPrefix string) (string, error) {
+	cleaned := filepath.Clean(path)
+	if strings.Contains(cleaned, "..") {
+		return "", fmt.Errorf("invalid path: contains path traversal")
+	}
+	if !strings.HasPrefix(cleaned, requiredPrefix) {
+		return "", fmt.Errorf("invalid path: outside allowed directory")
+	}
+	return cleaned, nil
 }
 
 // getSafePath 验证路径并返回安全的文件系统路径

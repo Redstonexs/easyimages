@@ -79,6 +79,16 @@ func List(cfg *config.Config) gin.HandlerFunc {
 		num := c.DefaultQuery("num", fmt.Sprintf("%d", cfg.ListNumber))
 		search := c.Query("search")
 
+		// 验证 search 参数只包含字母数字（防止 glob 注入）
+		if search != "" {
+			for _, ch := range search {
+				if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid search parameter"})
+					return
+				}
+			}
+		}
+
 		// 获取文件列表
 		basePath := cfg.Path + datePath
 		if search != "" {
@@ -559,20 +569,15 @@ func Download(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		// 验证路径安全性，防止路径遍历攻击
-		if strings.Contains(dw, "..") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
-			return
-		}
-
-		// 确保路径在允许的目录下
-		if !strings.HasPrefix(dw, cfg.Path) {
+		// 验证路径安全性（filepath.Clean 规范化后检查 ".."，防止 Windows 反斜杠绕过）
+		cleanPath, err := service.ValidateURLPath(dw, cfg.Path)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
 			return
 		}
 
 		// 使用验证后的安全路径
-		safePath := filepath.Join(".", filepath.Clean(dw))
+		safePath := filepath.Join(".", cleanPath)
 		if _, err := os.Stat(safePath); os.IsNotExist(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 			return
@@ -616,20 +621,15 @@ func HideImage(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		// 验证路径安全性，防止路径遍历攻击
-		if strings.Contains(path, "..") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
-			return
-		}
-
-		// 确保路径在允许的目录下
-		if !strings.HasPrefix(path, cfg.Path) {
+		// 验证路径安全性（filepath.Clean 规范化后检查 ".."，防止 Windows 反斜杠绕过）
+		cleanPath, err := service.ValidateURLPath(path, cfg.Path)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
 			return
 		}
 
 		// 使用验证后的安全路径
-		safePath := filepath.Join(".", filepath.Clean(path))
+		safePath := filepath.Join(".", cleanPath)
 		if _, err := os.Stat(safePath); os.IsNotExist(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
 			return
@@ -932,6 +932,16 @@ func History(cfg *config.Config) gin.HandlerFunc {
 
 		search := c.Query("search")
 
+		// 验证 search 参数只包含字母数字（防止 glob 注入）
+		if search != "" {
+			for _, ch := range search {
+				if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid search parameter"})
+					return
+				}
+			}
+		}
+
 		// 转换为文件系统路径
 		fsPath := "." + cfg.Path
 
@@ -1005,14 +1015,9 @@ func Filer(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		reqPath := c.DefaultQuery("path", cfg.Path)
 
-		// 验证路径安全性，防止路径遍历攻击
-		if strings.Contains(reqPath, "..") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
-			return
-		}
-
-		// 确保路径在允许的目录下
-		if !strings.HasPrefix(reqPath, cfg.Path) {
+		// 验证路径安全性（filepath.Clean 规范化后检查 ".."，防止 Windows 反斜杠绕过）
+		reqPath, err := service.ValidateURLPath(reqPath, cfg.Path)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
 			return
 		}
@@ -1065,12 +1070,9 @@ func ImageURLList(cfg *config.Config) gin.HandlerFunc {
 			pageSize = 50
 		}
 
-		// 验证路径安全性
-		if strings.Contains(reqPath, "..") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
-			return
-		}
-		if !strings.HasPrefix(reqPath, cfg.Path) {
+		// 验证路径安全性（filepath.Clean 规范化后检查 ".."，防止 Windows 反斜杠绕过）
+		reqPath, err := service.ValidateURLPath(reqPath, cfg.Path)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
 			return
 		}
@@ -1151,12 +1153,9 @@ func ImageURLListAPI(cfg *config.Config) gin.HandlerFunc {
 			pageSize = 100
 		}
 
-		// 验证路径安全性
-		if strings.Contains(reqPath, "..") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
-			return
-		}
-		if !strings.HasPrefix(reqPath, cfg.Path) {
+		// 验证路径安全性（filepath.Clean 规范化后检查 ".."，防止 Windows 反斜杠绕过）
+		reqPath, err := service.ValidateURLPath(reqPath, cfg.Path)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
 			return
 		}

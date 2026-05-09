@@ -143,7 +143,8 @@
     <script src="/public/static/zui/lib/clipboard/clipboard.min.js"></script>
     <script>
         const MAX_SIZE = {{.config.MaxSize}};
-        const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB per chunk
+        const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB per chunk (fewer round trips)
+        const MAX_CONCURRENT_CHUNKS = 4;    // 并发上传分片数
 
         function formatSize(bytes) {
             if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB';
@@ -348,38 +349,59 @@
             });
         }
 
-        // 大文件分片上传
+        // 大文件分片上传（并发）
         async function uploadFileChunked(file, index, onProgress) {
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
             const uploadId = genUploadId();
-            let uploadedBytes = 0;
+            const chunkProgress = new Array(totalChunks).fill(0);
+            let completedChunks = 0;
+            let lastResult = null;
+            let firstError = null;
 
-            for (let i = 0; i < totalChunks; i++) {
-                const start = i * CHUNK_SIZE;
-                const end = Math.min(start + CHUNK_SIZE, file.size);
-                const chunkBlob = file.slice(start, end);
-
-                const fd = new FormData();
-                fd.append('chunk', chunkBlob, file.name);
-                fd.append('uploadId', uploadId);
-                fd.append('chunkIndex', i.toString());
-                fd.append('totalChunks', totalChunks.toString());
-                // 每个分片都带文件名（最后一片合并时需要）
-                fd.append('filename', file.name);
-
-                const chunkResult = await sendChunk(fd, (loaded) => {
-                    // loaded 是当前分片的已传输字节
-                    onProgress(uploadedBytes + loaded);
-                });
-
-                uploadedBytes += (end - start);
-                onProgress(uploadedBytes);
-
-                // 最后一片返回的是完整上传结果
-                if (i === totalChunks - 1) {
-                    return chunkResult;
-                }
+            function updateChunkProgress() {
+                const totalUploaded = chunkProgress.reduce((s, v) => s + v, 0);
+                onProgress(totalUploaded);
             }
+
+            // 并发上传所有分片，限制并发数
+            const workers = [];
+            for (let w = 0; w < Math.min(MAX_CONCURRENT_CHUNKS, totalChunks); w++) {
+                workers.push((async () => {
+                    while (true) {
+                        // 从队列取下一个待处理的分片索引
+                        const i = completedChunks;
+                        if (i >= totalChunks || firstError) break;
+                        completedChunks++;
+
+                        const start = i * CHUNK_SIZE;
+                        const end = Math.min(start + CHUNK_SIZE, file.size);
+                        const chunkBlob = file.slice(start, end);
+
+                        const fd = new FormData();
+                        fd.append('chunk', chunkBlob, file.name);
+                        fd.append('uploadId', uploadId);
+                        fd.append('chunkIndex', i.toString());
+                        fd.append('totalChunks', totalChunks.toString());
+                        fd.append('filename', file.name);
+
+                        try {
+                            const result = await sendChunk(fd, (loaded) => {
+                                chunkProgress[i] = loaded;
+                                updateChunkProgress();
+                            });
+                            chunkProgress[i] = end - start;
+                            updateChunkProgress();
+                            if (i === totalChunks - 1) lastResult = result;
+                        } catch (err) {
+                            if (!firstError) firstError = err;
+                        }
+                    }
+                })());
+            }
+
+            await Promise.all(workers);
+            if (firstError) throw firstError;
+            return lastResult;
         }
 
         function sendChunk(formData, onChunkProgress) {
@@ -399,7 +421,7 @@
                 });
                 xhr.addEventListener('error', () => reject(new Error('网络错误')));
                 xhr.addEventListener('timeout', () => reject(new Error('分片上传超时')));
-                xhr.timeout = 60000; // 每个2MB分片60秒足够
+                xhr.timeout = 120000; // 5MB分片需要更长超时
                 xhr.open('POST', '/app/upload/chunk');
                 xhr.send(formData);
             });
