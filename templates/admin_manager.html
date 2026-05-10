@@ -69,6 +69,14 @@
                                 <input type="text" name="extensions" class="form-control" value="{{.config.Extensions}}">
                             </div>
                             <div class="form-group">
+                                <label>登录上传</label>
+                                <select name="mustLogin" class="form-control">
+                                    <option value="0" {{if eq .config.MustLogin 0}}selected{{end}}>关闭（所有人可上传）</option>
+                                    <option value="1" {{if eq .config.MustLogin 1}}selected{{end}}>开启（仅登录用户可上传）</option>
+                                </select>
+                                <p class="help-block">开启后必须登录才能上传图片，API上传不受此限制</p>
+                            </div>
+                            <div class="form-group">
                                 <label>图片质量</label>
                                 <input type="number" name="compress_ratio" class="form-control" value="{{.config.CompressRatio}}" min="1" max="100">
                             </div>

@@ -915,6 +915,11 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 					cfg.TextSize = n
 				}
 			}
+			if v := c.PostForm("mustLogin"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil {
+					cfg.MustLogin = n
+				}
+			}
 			// 注意：不更新 Password, User, Path, Port, HideKey 等敏感字段
 
 			if err := config.Save(cfg); err != nil {
