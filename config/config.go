@@ -103,6 +103,7 @@ type Config struct {
 	Md5Black            int      `json:"md5_black"`
 	Md5Blacklist        string   `json:"md5_blacklist"`
 	AutoDelete          int      `json:"auto_delete"`
+	TimeFormat          string   `json:"time_format"`
 	Timezone            string   `json:"timezone"`
 	IPUploadCounts      int      `json:"ip_upload_counts"`
 	Public              int      `json:"public"`
@@ -327,6 +328,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Timezone == "" {
 		cfg.Timezone = "Asia/Shanghai"
+	}
+	if cfg.TimeFormat == "" {
+		cfg.TimeFormat = "2006/01/02 15:04:05"
 	}
 	if cfg.ListNumber == 0 {
 		cfg.ListNumber = 20

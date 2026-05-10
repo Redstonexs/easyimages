@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -118,6 +118,7 @@
                                 <p class="help-block">为已有图片批量生成WebP版本，已有WebP的图片会自动跳过</p>
                             </div>
                             <hr>
+                            <h4><i class="icon icon-tint"></i> 水印设置</h4>
                             <div class="form-group">
                                 <label>水印类型</label>
                                 <select name="watermark" class="form-control">
@@ -129,6 +130,61 @@
                             <div class="form-group">
                                 <label>水印文字</label>
                                 <input type="text" name="waterText" class="form-control" value="{{.config.WaterText}}">
+                            </div>
+                            <div class="form-group">
+                                <label>水印位置</label>
+                                <select name="waterPosition" class="form-control">
+                                    <option value="1" {{if eq .config.WaterPosition 1}}selected{{end}}>左上</option>
+                                    <option value="2" {{if eq .config.WaterPosition 2}}selected{{end}}>上中</option>
+                                    <option value="3" {{if eq .config.WaterPosition 3}}selected{{end}}>右上</option>
+                                    <option value="4" {{if eq .config.WaterPosition 4}}selected{{end}}>左中</option>
+                                    <option value="5" {{if eq .config.WaterPosition 5}}selected{{end}}>居中</option>
+                                    <option value="6" {{if eq .config.WaterPosition 6}}selected{{end}}>右中</option>
+                                    <option value="7" {{if eq .config.WaterPosition 7}}selected{{end}}>左下</option>
+                                    <option value="8" {{if eq .config.WaterPosition 8}}selected{{end}}>下中</option>
+                                    <option value="9" {{if eq .config.WaterPosition 9}}selected{{end}}>右下</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>文字颜色</label>
+                                <input type="text" name="textColor" class="form-control" value="{{.config.TextColor}}" placeholder="rgba(255,0,0,1)">
+                            </div>
+                            <div class="form-group">
+                                <label>文字大小</label>
+                                <input type="number" name="textSize" class="form-control" value="{{.config.TextSize}}" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label>字体文件路径</label>
+                                <input type="text" name="textFont" class="form-control" value="{{.config.TextFont}}" placeholder="/public/static/font.ttf">
+                            </div>
+                            <div class="form-group">
+                                <label>水印图片路径</label>
+                                <input type="text" name="waterImg" class="form-control" value="{{.config.WaterImg}}" placeholder="/public/images/watermark.png">
+                            </div>
+                            <hr>
+                            <h4><i class="icon icon-cog"></i> 其他设置</h4>
+                            <div class="form-group">
+                                <label>上传MIME类型限制</label>
+                                <input type="text" name="mime" class="form-control" value="{{.config.Mime}}" placeholder="image/*,video/*">
+                                <p class="help-block">允许上传的MIME类型，多个用逗号分隔，如 image/*,video/*</p>
+                            </div>
+                            <div class="form-group">
+                                <label>路径规则</label>
+                                <input type="text" name="storage_path" class="form-control" value="{{.config.StoragePath}}" placeholder="Y/m/d/">
+                                <p class="help-block">图片存储子目录规则，Y=年 m=月 d=日，如 Y/m/d/ 表示按年月日分目录</p>
+                            </div>
+                            <div class="form-group">
+                                <label>时间格式</label>
+                                <input type="text" name="time_format" class="form-control" value="{{.config.TimeFormat}}" placeholder="2006/01/02 15:04:05">
+                                <p class="help-block">Go时间格式，参考: 2006-01-02 15:04:05, 2006/01/02</p>
+                            </div>
+                            <div class="form-group">
+                                <label>自动删除旧图</label>
+                                <select name="auto_delete" class="form-control">
+                                    <option value="0" {{if eq .config.AutoDelete 0}}selected{{end}}>关闭</option>
+                                    <option value="1" {{if eq .config.AutoDelete 1}}selected{{end}}>开启</option>
+                                </select>
+                                <p class="help-block">开启后自动删除过期的图片（需配合回收站使用）</p>
                             </div>
                             <button type="submit" class="btn btn-primary">
                                 <i class="icon icon-save"></i> 保存配置

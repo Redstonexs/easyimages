@@ -391,6 +391,11 @@ func convertPHPToGoConfig(phpConfig map[string]interface{}) *Config {
 	if v, ok := phpConfig["timezone"].(string); ok {
 		cfg.Timezone = v
 	}
+	if v, ok := phpConfig["auto_delete"].(string); ok {
+		if n, err := parseInt(v); err == nil {
+			cfg.AutoDelete = n
+		}
+	}
 	if v, ok := phpConfig["ip_upload_counts"].(string); ok {
 		if n, err := parseInt(v); err == nil {
 			cfg.IPUploadCounts = n

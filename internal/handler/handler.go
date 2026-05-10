@@ -812,6 +812,9 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		// 验证验证码
+		log.Printf("[Login] captcha=%d, captcha_type=%d, answer=%q, token=%q",
+			cfg.Captcha, cfg.CaptchaType,
+			c.PostForm("captcha_answer"), c.PostForm("captcha_token"))
 		if cfg.Captcha == 1 {
 			ok, msg := service.VerifyCaptcha(cfg,
 				c.PostForm("captcha_answer"),
@@ -820,8 +823,10 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 				c.PostForm("g_recaptcha_response"),
 			)
 			if !ok {
-				captchaData := service.GenerateCaptcha(cfg)
-				c.HTML(http.StatusOK, "admin_login.html", gin.H{
+		captchaData := service.GenerateCaptcha(cfg)
+		log.Printf("[Login page] captcha=%d, captcha_type=%d, captcha_data_type=%s, question=%q",
+			cfg.Captcha, cfg.CaptchaType, captchaData.Type, captchaData.Question)
+		c.HTML(http.StatusOK, "admin_login.html", gin.H{
 					"config":  cfg,
 					"error":   msg,
 					"captcha": captchaData,
@@ -961,6 +966,26 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 			if v := c.PostForm("textSize"); v != "" {
 				if n, err := strconv.Atoi(v); err == nil && n > 0 {
 					cfg.TextSize = n
+				}
+			}
+			if v := c.PostForm("textFont"); v != "" {
+				cfg.TextFont = v
+			}
+			if v := c.PostForm("waterImg"); v != "" {
+				cfg.WaterImg = v
+			}
+			if v := c.PostForm("mime"); v != "" {
+				cfg.Mime = v
+			}
+			if v := c.PostForm("storage_path"); v != "" {
+				cfg.StoragePath = v
+			}
+			if v := c.PostForm("time_format"); v != "" {
+				cfg.TimeFormat = v
+			}
+			if v := c.PostForm("auto_delete"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil {
+					cfg.AutoDelete = n
 				}
 			}
 			if v := c.PostForm("mustLogin"); v != "" {
