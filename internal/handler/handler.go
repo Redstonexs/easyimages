@@ -5,6 +5,7 @@ import (
 	"easyimage/internal/service"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -240,11 +241,15 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 			}
 		}
 
-		chunk, _ := c.FormFile("chunk")
+		chunk, formFileErr := c.FormFile("chunk")
 
 		// 保存分片（如果有实际文件数据）
 		chunkDir := filepath.Join(".", cfg.Path, "chunks", uploadId)
 		if chunk != nil {
+			if chunk.Size == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": fmt.Sprintf("分片 %d 为空文件", chunkIndex)})
+				return
+			}
 			if err := os.MkdirAll(chunkDir, 0755); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建分片目录失败"})
 				return
@@ -260,7 +265,12 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 		// 不再自动合并，客户端需发送 merge=true 参数显式触发合并。
 		if !isMerge {
 			if chunk == nil {
-				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "缺少分片数据"})
+				errMsg := "缺少分片数据"
+				if formFileErr != nil {
+					errMsg = fmt.Sprintf("读取分片数据失败: %v", formFileErr)
+					log.Printf("[chunk upload] FormFile error for uploadId=%s chunkIndex=%d: %v", uploadId, chunkIndex, formFileErr)
+				}
+				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": errMsg})
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"result": "success", "code": 200, "message": "分片上传成功", "chunkIndex": chunkIndex})
