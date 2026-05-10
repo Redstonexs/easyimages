@@ -818,6 +818,29 @@ func getSafePath(userPath string) (string, error) {
 	return filepath.Join(allowedDir, relPath), nil
 }
 
+// SanitizePath validates that a constructed filesystem path is within the image storage
+// directory and returns a cleaned absolute path. Use on paths built from user-influenced
+// components (e.g. uploadId) to break CodeQL taint chains.
+func SanitizePath(pathStr string) (string, error) {
+	cfg := config.Get()
+	allowedDir, err := filepath.Abs(filepath.Join(".", cfg.Path))
+	if err != nil {
+		return "", fmt.Errorf("invalid config path")
+	}
+	absPath, err := filepath.Abs(filepath.Clean(pathStr))
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	relPath, err := filepath.Rel(allowedDir, absPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	if strings.HasPrefix(relPath, "..") || filepath.IsAbs(relPath) {
+		return "", fmt.Errorf("invalid path: outside allowed directory")
+	}
+	return filepath.Join(allowedDir, relPath), nil
+}
+
 // sanitizeFilename 清理文件名，移除危险字符
 func sanitizeFilename(name string) string	{
 	// 只保留字母、数字、下划线、连字符和点

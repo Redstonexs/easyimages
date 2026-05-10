@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"easyimage/config"
+	"golang.org/x/crypto/hkdf"
 )
 
 const (
@@ -37,15 +38,23 @@ type CaptchaData struct {
 	SiteKey string `json:"site_key,omitempty"`
 }
 
-// generateCaptchaHMACKey derives a key from config password for HMAC signing
+// generateCaptchaHMACKey derives a key from config password using HKDF-SHA256.
+// HKDF (RFC 5869) is a proper KDF designed for key derivation from a shared secret.
 func generateCaptchaHMACKey() []byte {
 	cfg := config.Get()
 	secret := cfg.Password
 	if secret == "" {
 		secret = captchaHMACKey
 	}
-	h := sha256.Sum256([]byte(captchaHMACKey + secret))
-	return h[:]
+	// HKDF(secret, salt, info) → key material
+	// salt = captchaHMACKey constant, info = "captcha-hmac-key"
+	hkdfReader := hkdf.New(sha256.New, []byte(secret), []byte(captchaHMACKey), []byte("captcha-hmac-key"))
+	key := make([]byte, 32) // SHA-256 output size
+	if _, err := io.ReadFull(hkdfReader, key); err != nil {
+		// Should never happen with a 32-byte request from SHA-256 HKDF
+		log.Printf("[Captcha] HKDF key derivation failed: %v", err)
+	}
+	return key
 }
 
 // captchaTokenData data embedded in the captcha token

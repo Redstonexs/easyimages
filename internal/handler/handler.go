@@ -274,7 +274,11 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 		chunk, formFileErr := c.FormFile("chunk")
 
 		// 保存分片（如果有实际文件数据）
-		chunkDir := filepath.Join(".", cfg.Path, "chunks", uploadId)
+		chunkDir, pathErr := service.SanitizePath(filepath.Join(".", cfg.Path, "chunks", uploadId))
+		if pathErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的上传路径"})
+			return
+		}
 		if chunk != nil {
 			if chunk.Size == 0 {
 				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": fmt.Sprintf("分片 %d 为空文件", chunkIndex)})
@@ -337,7 +341,12 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 		storagePath = strings.Replace(storagePath, "Y", fmt.Sprintf("%04d", now.Year()), 1)
 		storagePath = strings.Replace(storagePath, "m", fmt.Sprintf("%02d", now.Month()), 1)
 		storagePath = strings.Replace(storagePath, "d", fmt.Sprintf("%02d", now.Day()), 1)
-		uploadDir := filepath.Join(".", cfg.Path, storagePath)
+		uploadDir, dirErr := service.SanitizePath(filepath.Join(".", cfg.Path, storagePath))
+		if dirErr != nil {
+			os.RemoveAll(chunkDir)
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "存储路径无效"})
+			return
+		}
 		if err := os.MkdirAll(uploadDir, 0755); err != nil {
 			os.RemoveAll(chunkDir)
 			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建存储目录失败"})
@@ -442,7 +451,11 @@ func ChunkCleanup(cfg *config.Config) gin.HandlerFunc {
 			}
 		}
 
-		chunkDir := filepath.Join(".", cfg.Path, "chunks", uploadId)
+		chunkDir, pathErr := service.SanitizePath(filepath.Join(".", cfg.Path, "chunks", uploadId))
+		if pathErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的路径"})
+			return
+		}
 		os.RemoveAll(chunkDir)
 		c.JSON(http.StatusOK, gin.H{"result": "success", "code": 200})
 	}

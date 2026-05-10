@@ -164,6 +164,13 @@ func AddWatermark(imgPath string, cfg *config.Config) error {
 		return nil
 	}
 
+	// 验证路径安全性
+	safePath, err := SanitizePath(imgPath)
+	if err != nil {
+		return fmt.Errorf("invalid image path: %w", err)
+	}
+	imgPath = safePath
+
 	// 打开图片
 	img, err := imaging.Open(imgPath)
 	if err != nil {
@@ -276,6 +283,13 @@ func calculatePosition(dst, src image.Rectangle, position int) (int, int) {
 
 // CompressImage 压缩图片
 func CompressImage(imgPath string, quality int) error {
+	// 验证路径安全性
+	safePath, err := SanitizePath(imgPath)
+	if err != nil {
+		return fmt.Errorf("invalid image path: %w", err)
+	}
+	imgPath = safePath
+
 	// 打开图片
 	file, err := os.Open(imgPath)
 	if err != nil {
@@ -326,6 +340,13 @@ func CompressImage(imgPath string, quality int) error {
 
 // ResizeImage 调整图片大小
 func ResizeImage(imgPath string, width, height int) error {
+	// 验证路径安全性
+	safePath, err := SanitizePath(imgPath)
+	if err != nil {
+		return fmt.Errorf("invalid image path: %w", err)
+	}
+	imgPath = safePath
+
 	img, err := imaging.Open(imgPath)
 	if err != nil {
 		return err
@@ -340,6 +361,12 @@ func ResizeImage(imgPath string, width, height int) error {
 
 // CropImage 裁剪图片
 func CropImage(imgPath string, width, height int) error {
+	safePath, err := SanitizePath(imgPath)
+	if err != nil {
+		return fmt.Errorf("invalid image path: %w", err)
+	}
+	imgPath = safePath
+
 	img, err := imaging.Open(imgPath)
 	if err != nil {
 		return err
@@ -353,6 +380,13 @@ func CropImage(imgPath string, width, height int) error {
 
 // ConvertImage 转换图片格式
 func ConvertImage(imgPath, format string) (string, error) {
+	// 验证路径安全性
+	safePath, err := SanitizePath(imgPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid image path: %w", err)
+	}
+	imgPath = safePath
+
 	// 新文件路径
 	newPath := strings.TrimSuffix(imgPath, filepath.Ext(imgPath)) + "." + format
 
@@ -394,7 +428,11 @@ func ConvertImage(imgPath, format string) (string, error) {
 
 // IsGifAnimated 检查GIF是否动态（流式搜索，不将整个文件读入内存）
 func IsGifAnimated(path string) bool {
-	file, err := os.Open(path)
+	safePath, err := SanitizePath(path)
+	if err != nil {
+		return false
+	}
+	file, err := os.Open(safePath)
 	if err != nil {
 		return false
 	}
@@ -445,7 +483,11 @@ func IsGifAnimated(path string) bool {
 
 // IsAnimatedWebP 检查WebP是否动态（流式搜索 ANMF 标记，不将整个文件读入内存）
 func IsAnimatedWebP(path string) bool {
-	file, err := os.Open(path)
+	safePath, err := SanitizePath(path)
+	if err != nil {
+		return false
+	}
+	file, err := os.Open(safePath)
 	if err != nil {
 		return false
 	}
@@ -477,7 +519,11 @@ func IsAnimatedWebP(path string) bool {
 
 // GenerateImageHash 生成图片哈希（流式计算，不将整个文件读入内存）
 func GenerateImageHash(path string) string {
-	f, err := os.Open(path)
+	safePath, err := SanitizePath(path)
+	if err != nil {
+		return ""
+	}
+	f, err := os.Open(safePath)
 	if err != nil {
 		return ""
 	}
@@ -708,7 +754,11 @@ func IsAllowedExtension(filename string, cfg *config.Config) bool {
 // CheckSVGSecurity 检查SVG安全性，防止XSS攻击
 // 直接在字节切片上搜索，避免将整个内容转为 string 产生额外拷贝。
 func CheckSVGSecurity(path string) bool {
-	content, err := os.ReadFile(path)
+	safePath, err := SanitizePath(path)
+	if err != nil {
+		return false
+	}
+	content, err := os.ReadFile(safePath)
 	if err != nil {
 		return false
 	}
