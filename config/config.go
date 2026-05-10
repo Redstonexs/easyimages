@@ -35,6 +35,11 @@ type Config struct {
 	FtpCompleteDelLocal int      `json:"ftp_complete_del_local"`
 	FtpDellocSync       int      `json:"ftp_delloc_sync"`
 	Captcha             int      `json:"captcha"`
+	CaptchaType         int      `json:"captcha_type"`
+	TurnstileSiteKey    string   `json:"turnstile_site_key"`
+	TurnstileSecretKey  string   `json:"turnstile_secret_key"`
+	RecaptchaSiteKey    string   `json:"recaptcha_site_key"`
+	RecaptchaSecretKey  string   `json:"recaptcha_secret_key"`
 	MustLogin           int      `json:"mustLogin"`
 	APIStatus           int      `json:"apiStatus"`
 	Path                string   `json:"path"`

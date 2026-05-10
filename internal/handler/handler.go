@@ -31,6 +31,14 @@ func Index(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
+// CaptchaAPI 获取验证码
+func CaptchaAPI(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		data := service.GenerateCaptcha(cfg)
+		c.JSON(http.StatusOK, data)
+	}
+}
+
 // AdminLoginAPI 管理员登录API
 func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -42,6 +50,23 @@ func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 				"message": "登录尝试过于频繁，请5分钟后再试",
 			})
 			return
+		}
+
+		// 验证验证码
+		if cfg.Captcha == 1 {
+			ok, msg := service.VerifyCaptcha(cfg,
+				c.PostForm("captcha_answer"),
+				c.PostForm("captcha_token"),
+				c.PostForm("cf_turnstile_response"),
+				c.PostForm("g_recaptcha_response"),
+			)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"result":  "failed",
+					"message": msg,
+				})
+				return
+			}
 		}
 
 		user := c.PostForm("user")
@@ -766,8 +791,10 @@ func AdminIndex(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
+		captchaData := service.GenerateCaptcha(cfg)
 		c.HTML(http.StatusOK, "admin_login.html", gin.H{
-			"config": cfg,
+			"config":  cfg,
+			"captcha": captchaData,
 		})
 	}
 }
@@ -784,6 +811,25 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
+		// 验证验证码
+		if cfg.Captcha == 1 {
+			ok, msg := service.VerifyCaptcha(cfg,
+				c.PostForm("captcha_answer"),
+				c.PostForm("captcha_token"),
+				c.PostForm("cf_turnstile_response"),
+				c.PostForm("g_recaptcha_response"),
+			)
+			if !ok {
+				captchaData := service.GenerateCaptcha(cfg)
+				c.HTML(http.StatusOK, "admin_login.html", gin.H{
+					"config":  cfg,
+					"error":   msg,
+					"captcha": captchaData,
+				})
+				return
+			}
+		}
+
 		user := c.PostForm("user")
 		password := c.PostForm("password")
 
@@ -796,9 +842,11 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		service.RecordFailedLogin(clientIP)
+		captchaData := service.GenerateCaptcha(cfg)
 		c.HTML(http.StatusOK, "admin_login.html", gin.H{
 			"config":  cfg,
 			"error":   message,
+			"captcha": captchaData,
 		})
 	}
 }
@@ -919,6 +967,28 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 				if n, err := strconv.Atoi(v); err == nil {
 					cfg.MustLogin = n
 				}
+			}
+			if v := c.PostForm("captcha"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil {
+					cfg.Captcha = n
+				}
+			}
+			if v := c.PostForm("captcha_type"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil {
+					cfg.CaptchaType = n
+				}
+			}
+			if v := c.PostForm("turnstile_site_key"); v != "" {
+				cfg.TurnstileSiteKey = v
+			}
+			if v := c.PostForm("turnstile_secret_key"); v != "" {
+				cfg.TurnstileSecretKey = v
+			}
+			if v := c.PostForm("recaptcha_site_key"); v != "" {
+				cfg.RecaptchaSiteKey = v
+			}
+			if v := c.PostForm("recaptcha_secret_key"); v != "" {
+				cfg.RecaptchaSecretKey = v
 			}
 			// 注意：不更新 Password, User, Path, Port, HideKey 等敏感字段
 

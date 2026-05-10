@@ -15,6 +15,28 @@
             border-radius: 10px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
+        .captcha-question {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 12px 15px;
+            margin-bottom: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+            letter-spacing: 2px;
+            user-select: none;
+        }
+        .captcha-refresh {
+            cursor: pointer;
+            color: #007bff;
+            font-size: 13px;
+            margin-bottom: 15px;
+            display: inline-block;
+        }
+        .captcha-refresh:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -24,7 +46,7 @@
             {{if .error}}
             <div class="alert alert-danger">{{.error}}</div>
             {{end}}
-            <form method="POST" action="/admin/index">
+            <form method="POST" action="/admin/index" id="loginForm">
                 <div class="form-group">
                     <label>用户名</label>
                     <input type="text" name="user" class="form-control" required placeholder="请输入用户名">
@@ -33,6 +55,54 @@
                     <label>密码</label>
                     <input type="password" name="password" class="form-control" required placeholder="请输入密码">
                 </div>
+                {{if and .captcha (ne .captcha.Type "disabled")}}
+                <div class="form-group" id="captcha-group">
+                    {{if eq .captcha.Type "builtin"}}
+                    <label>验证码</label>
+                    <div class="captcha-question" id="captcha-question">{{.captcha.Question}}</div>
+                    <input type="hidden" name="captcha_token" id="captcha_token" value="{{.captcha.Token}}">
+                    <input type="text" name="captcha_answer" id="captcha_answer" class="form-control" required placeholder="请输入计算结果" autocomplete="off">
+                    <span class="captcha-refresh" onclick="refreshCaptcha()">换一题</span>
+                    {{else if eq .captcha.Type "turnstile"}}
+                    <input type="hidden" name="cf_turnstile_response" id="cf_turnstile_response">
+                    <div id="turnstile-container"></div>
+                    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+                    <script>
+                    function onTurnstileLoad() {
+                        if (typeof turnstile !== 'undefined') {
+                            turnstile.render('#turnstile-container', {
+                                sitekey: '{{.captcha.SiteKey}}',
+                                callback: function(token) {
+                                    document.getElementById('cf_turnstile_response').value = token;
+                                }
+                            });
+                        } else {
+                            setTimeout(onTurnstileLoad, 200);
+                        }
+                    }
+                    onTurnstileLoad();
+                    </script>
+                    {{else if eq .captcha.Type "recaptcha"}}
+                    <input type="hidden" name="g_recaptcha_response" id="g_recaptcha_response">
+                    <div id="recaptcha-container"></div>
+                    <script src="https://www.google.com/recaptcha/api.js?render={{.captcha.SiteKey}}"></script>
+                    <script>
+                    function onRecaptchaLoad() {
+                        if (typeof grecaptcha !== 'undefined' && grecaptcha.ready) {
+                            grecaptcha.ready(function() {
+                                grecaptcha.execute('{{.captcha.SiteKey}}', {action: 'login'}).then(function(token) {
+                                    document.getElementById('g_recaptcha_response').value = token;
+                                });
+                            });
+                        } else {
+                            setTimeout(onRecaptchaLoad, 200);
+                        }
+                    }
+                    onRecaptchaLoad();
+                    </script>
+                    {{end}}
+                </div>
+                {{end}}
                 <button type="submit" class="btn btn-primary btn-block">
                     <i class="icon icon-sign-in"></i> 登录
                 </button>
@@ -42,6 +112,20 @@
             </div>
         </div>
     </div>
+    {{if and .captcha (eq .captcha.Type "builtin")}}
+    <script>
+    function refreshCaptcha() {
+        fetch('/api/captcha')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.question) {
+                    document.getElementById('captcha-question').textContent = data.question;
+                    document.getElementById('captcha_token').value = data.token;
+                    document.getElementById('captcha_answer').value = '';
+                }
+            });
+    }
+    </script>
+    {{end}}
 </body>
 </html>
-

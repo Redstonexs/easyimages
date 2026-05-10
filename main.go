@@ -185,6 +185,7 @@ func main() {
 
 	// 登录API
 	r.POST("/api/login", handler.AdminLoginAPI(cfg))
+	r.GET("/api/captcha", handler.CaptchaAPI(cfg))
 
 	// 上传路由
 	r.POST("/app/upload", middleware.CheckLogin(cfg), handler.Upload(cfg))
