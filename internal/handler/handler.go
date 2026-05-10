@@ -22,10 +22,12 @@ func Index(cfg *config.Config) gin.HandlerFunc {
 		// 检查登录状态
 		isAdmin := service.IsAdmin(c)
 
+		captchaData := service.GenerateCaptcha(cfg)
 		data := gin.H{
 			"config":  cfg,
 			"version": config.Version,
 			"isAdmin": isAdmin,
+			"captcha": captchaData,
 		}
 		c.HTML(http.StatusOK, "index.html", data)
 	}
@@ -54,6 +56,9 @@ func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 
 		// 验证验证码
 		if cfg.Captcha == 1 {
+			log.Printf("[API Login] captcha=%d, captcha_type=%d, answer=%q, token=%q",
+				cfg.Captcha, cfg.CaptchaType,
+				c.PostForm("captcha_answer"), c.PostForm("captcha_token"))
 			ok, msg := service.VerifyCaptcha(cfg,
 				c.PostForm("captcha_answer"),
 				c.PostForm("captcha_token"),

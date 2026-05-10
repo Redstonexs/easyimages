@@ -122,6 +122,50 @@
                     <div id="loginError" class="alert alert-danger" style="display: none;"></div>
                     <div class="form-group"><label>用户名</label><input type="text" id="loginUser" class="form-control" placeholder="请输入用户名" required></div>
                     <div class="form-group"><label>密码</label><input type="password" id="loginPass" class="form-control" placeholder="请输入密码" required></div>
+                    {{if and .captcha (ne .captcha.Type "disabled")}}
+                    <div class="form-group" id="login-captcha-group">
+                        {{if eq .captcha.Type "builtin"}}
+                        <label>验证码</label>
+                        <div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:5px;padding:12px 15px;margin-bottom:10px;font-size:16px;font-weight:bold;text-align:center;letter-spacing:2px;user-select:none;" id="login-captcha-question">{{.captcha.Question}}</div>
+                        <input type="hidden" id="login_captcha_token" value="{{.captcha.Token}}">
+                        <input type="text" id="login_captcha_answer" class="form-control" required placeholder="请输入计算结果" autocomplete="off">
+                        <span style="cursor:pointer;color:#007bff;font-size:13px;margin-bottom:15px;display:inline-block;" onclick="refreshLoginCaptcha()">换一题</span>
+                        {{else if eq .captcha.Type "turnstile"}}
+                        <input type="hidden" id="login_cf_turnstile_response">
+                        <div id="login-turnstile-container"></div>
+                        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+                        <script>
+                        function onTurnstileLoad() {
+                            if (typeof turnstile !== 'undefined') {
+                                turnstile.render('#login-turnstile-container', {
+                                    sitekey: '{{.captcha.SiteKey}}',
+                                    callback: function(token) {
+                                        document.getElementById('login_cf_turnstile_response').value = token;
+                                    }
+                                });
+                            } else { setTimeout(onTurnstileLoad, 200); }
+                        }
+                        onTurnstileLoad();
+                        </script>
+                        {{else if eq .captcha.Type "recaptcha"}}
+                        <input type="hidden" id="login_g_recaptcha_response">
+                        <div id="login-recaptcha-container"></div>
+                        <script src="https://www.google.com/recaptcha/api.js?render={{.captcha.SiteKey}}"></script>
+                        <script>
+                        function onRecaptchaLoad() {
+                            if (typeof grecaptcha !== 'undefined' && grecaptcha.ready) {
+                                grecaptcha.ready(function() {
+                                    grecaptcha.execute('{{.captcha.SiteKey}}', {action: 'login'}).then(function(token) {
+                                        document.getElementById('login_g_recaptcha_response').value = token;
+                                    });
+                                });
+                            } else { setTimeout(onRecaptchaLoad, 200); }
+                        }
+                        onRecaptchaLoad();
+                        </script>
+                        {{end}}
+                    </div>
+                    {{end}}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
@@ -170,13 +214,34 @@
             $('#loginBtn').click(function() {
                 var u = $('#loginUser').val(), p = $('#loginPass').val();
                 if (!u || !p) { $('#loginError').text('请输入用户名和密码').show(); return; }
-                $.ajax({ url:'/api/login', type:'POST', data:{user:u,password:p},
+                var loginData = {user:u, password:p};
+                var ca = $('#login_captcha_answer');
+                if (ca.length) loginData.captcha_answer = ca.val();
+                var ct = $('#login_captcha_token');
+                if (ct.length) loginData.captcha_token = ct.val();
+                var cfr = $('#login_cf_turnstile_response');
+                if (cfr.length) loginData.cf_turnstile_response = cfr.val();
+                var gr = $('#login_g_recaptcha_response');
+                if (gr.length) loginData.g_recaptcha_response = gr.val();
+                $.ajax({ url:'/api/login', type:'POST', data:loginData,
                     success:function(d){if(d.result==='success')window.location.href='/admin/manager';else $('#loginError').text(d.message||'登录失败').show();},
                     error:function(x){var m='登录失败';try{m=JSON.parse(x.responseText).message||m;}catch(e){} $('#loginError').text(m).show();}
                 });
             });
             $('#loginPass').keypress(function(e){if(e.which===13)$('#loginBtn').click();});
         });
+
+        function refreshLoginCaptcha() {
+            fetch('/api/captcha')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.question) {
+                        document.getElementById('login-captcha-question').textContent = data.question;
+                        document.getElementById('login_captcha_token').value = data.token;
+                        document.getElementById('login_captcha_answer').value = '';
+                    }
+                });
+        }
 
         // ===== 上传 =====
         const uploadArea = document.getElementById('uploadArea');
