@@ -312,6 +312,16 @@ func setDefaults(cfg *Config) {
 	if cfg.Extensions == "" {
 		cfg.Extensions = "jpg,jpeg,png,gif,bmp,webp,ico,jfif,tif,tga,svg"
 	}
+	// 验证验证码配置：如果启用了外部验证码服务但未配置密钥，自动回退到内置验证码
+	if cfg.Captcha > 0 {
+		cfg.Captcha = 1 // 规范化为 0/1
+		if cfg.CaptchaType == 1 && (cfg.TurnstileSiteKey == "" || cfg.TurnstileSecretKey == "") {
+			cfg.CaptchaType = 0 // Turnstile 密钥未配置，回退到内置
+		}
+		if cfg.CaptchaType == 2 && (cfg.RecaptchaSiteKey == "" || cfg.RecaptchaSecretKey == "") {
+			cfg.CaptchaType = 0 // reCAPTCHA 密钥未配置，回退到内置
+		}
+	}
 	if cfg.Port == 0 {
 		cfg.Port = 8080
 	}

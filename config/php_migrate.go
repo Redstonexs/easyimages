@@ -285,8 +285,10 @@ func convertPHPToGoConfig(phpConfig map[string]interface{}) *Config {
 		}
 	}
 	if v, ok := phpConfig["captcha"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.Captcha = n
+		if _, err := parseInt(v); err == nil {
+			// PHP版本的验证码系统与Go版本不同，迁移时默认禁用验证码
+			// 用户可在管理后台手动重新配置
+			cfg.Captcha = 0
 		}
 	}
 	if v, ok := phpConfig["check_ip"].(string); ok {

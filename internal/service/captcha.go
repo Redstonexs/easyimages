@@ -62,11 +62,19 @@ func GenerateCaptcha(cfg *config.Config) CaptchaData {
 
 	switch cfg.CaptchaType {
 	case CaptchaTypeTurnstile:
+		if cfg.TurnstileSiteKey == "" || cfg.TurnstileSecretKey == "" {
+			// 密钥未配置，回退到内置验证码
+			return generateBuiltinCaptcha()
+		}
 		return CaptchaData{
 			Type:    "turnstile",
 			SiteKey: cfg.TurnstileSiteKey,
 		}
 	case CaptchaTypeRecaptcha:
+		if cfg.RecaptchaSiteKey == "" || cfg.RecaptchaSecretKey == "" {
+			// 密钥未配置，回退到内置验证码
+			return generateBuiltinCaptcha()
+		}
 		return CaptchaData{
 			Type:    "recaptcha",
 			SiteKey: cfg.RecaptchaSiteKey,
@@ -125,8 +133,14 @@ func VerifyCaptcha(cfg *config.Config, captchaAnswer, captchaToken, turnstileRes
 
 	switch cfg.CaptchaType {
 	case CaptchaTypeTurnstile:
+		if cfg.TurnstileSecretKey == "" {
+			return verifyBuiltinCaptcha(captchaAnswer, captchaToken)
+		}
 		return verifyTurnstile(cfg.TurnstileSecretKey, turnstileResponse)
 	case CaptchaTypeRecaptcha:
+		if cfg.RecaptchaSecretKey == "" {
+			return verifyBuiltinCaptcha(captchaAnswer, captchaToken)
+		}
 		return verifyRecaptcha(cfg.RecaptchaSecretKey, recaptchaResponse)
 	default:
 		return verifyBuiltinCaptcha(captchaAnswer, captchaToken)
