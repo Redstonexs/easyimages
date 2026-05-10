@@ -609,6 +609,88 @@ func GetWebPURL(originalPath string, cfg *config.Config) string {
 	return ""
 }
 
+// BatchWebPResult 批量 WebP 转换结果
+type BatchWebPResult struct {
+	Total    int `json:"total"`    // 扫描到的图片总数
+	Skipped  int `json:"skipped"`  // 已有 WebP 或不支持的文件数
+	Converted int  `json:"converted"` // 成功转换数
+	Failed   int `json:"failed"`   // 转换失败数
+}
+
+// BatchConvertToWebP 扫描存量图片并批量生成 WebP 版本。
+// 跳过已有 WebP 的文件、动态 GIF、SVG 和系统内部目录。
+func BatchConvertToWebP(cfg *config.Config) BatchWebPResult {
+	var result BatchWebPResult
+
+	// cwebp 不可用时直接返回
+	if _, err := exec.LookPath("cwebp"); err != nil {
+		log.Printf("[BatchWebP] cwebp 未安装，无法执行批量转换")
+		return result
+	}
+
+	storageDir := "." + cfg.Path
+	webpDir := filepath.Join(storageDir, "webp")
+
+	// 可转换为 WebP 的扩展名
+	convertibleExts := map[string]bool{
+		".jpg": true, ".jpeg": true, ".png": true,
+		".bmp": true, ".tiff": true, ".tif": true, ".tga": true,
+	}
+
+	filepath.Walk(storageDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		// 跳过目录
+		if info.IsDir() {
+			// 跳过系统内部目录和 webp 目录本身
+			name := info.Name()
+			if path != storageDir && (internalDirs[name] || name == "webp") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		ext := strings.ToLower(filepath.Ext(path))
+		if !convertibleExts[ext] {
+			return nil
+		}
+
+		result.Total++
+
+		// 计算对应的 WebP 路径
+		relToStorage, err := filepath.Rel(storageDir, path)
+		if err != nil {
+			return nil
+		}
+		webpPath := filepath.Join(webpDir, strings.TrimSuffix(relToStorage, filepath.Ext(relToStorage))+".webp")
+
+		// 已存在则跳过
+		if _, err := os.Stat(webpPath); err == nil {
+			result.Skipped++
+			return nil
+		}
+
+		// 跳过动态 GIF
+		if ext == ".gif" && IsGifAnimated(path) {
+			result.Skipped++
+			return nil
+		}
+
+		// 转换
+		if err := ConvertToWebP(path, cfg); err != nil {
+			log.Printf("[BatchWebP] 转换失败 %s: %v", path, err)
+			result.Failed++
+		} else {
+			result.Converted++
+		}
+
+		return nil
+	})
+
+	return result
+}
+
 // GetAllowedExtensions 获取允许的扩展名
 func GetAllowedExtensions(cfg *config.Config) []string {
 	if cfg.Extensions == "" {

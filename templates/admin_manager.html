@@ -110,6 +110,13 @@
                                 <label>WebP质量 (1-100)</label>
                                 <input type="number" name="webp_quality" class="form-control" value="{{.config.WebpQuality}}" min="1" max="100">
                             </div>
+                            <div class="form-group">
+                                <button type="button" id="batchWebpBtn" class="btn btn-success">
+                                <i class="icon icon-refresh"></i> 批量生成WebP
+                                </button>
+                                <span id="batchWebpResult" class="help-block" style="margin-left:10px;"></span>
+                                <p class="help-block">为已有图片批量生成WebP版本，已有WebP的图片会自动跳过</p>
+                            </div>
                             <hr>
                             <div class="form-group">
                                 <label>水印类型</label>
@@ -150,6 +157,34 @@
                         icon: 'exclamation-sign'
                     }).show();
                 }
+            });
+        });
+
+        $('#batchWebpBtn').on('click', function() {
+            var btn = $(this);
+            btn.prop('disabled', true).html('<i class="icon icon-spin icon-spinner"></i> 转换中...');
+            $('#batchWebpResult').text('');
+            $.post('/admin/batch-webp', function(data) {
+                btn.prop('disabled', false).html('<i class="icon icon-refresh"></i> 批量生成WebP');
+                if (data.result === 'success') {
+                    new $.zui.Messager(data.message, {
+                        type: 'success',
+                        icon: 'ok-sign'
+                    }).show();
+                    $('#batchWebpResult').text(data.message);
+                } else {
+                    new $.zui.Messager(data.message || '转换失败', {
+                        type: 'danger',
+                        icon: 'exclamation-sign'
+                    }).show();
+                    $('#batchWebpResult').text(data.message || '转换失败');
+                }
+            }).fail(function() {
+                btn.prop('disabled', false).html('<i class="icon icon-refresh"></i> 批量生成WebP');
+                new $.zui.Messager('请求失败', {
+                    type: 'danger',
+                    icon: 'exclamation-sign'
+                }).show();
             });
         });
     </script>

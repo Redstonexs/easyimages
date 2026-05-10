@@ -944,6 +944,30 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
+// BatchWebP 批量为存量图片生成 WebP 格式
+func BatchWebP(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if cfg.WebpConvert == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"result":  "failed",
+				"message": "WebP转换未开启，请先在配置中开启",
+			})
+			return
+		}
+
+		result := service.BatchConvertToWebP(cfg)
+
+		c.JSON(http.StatusOK, gin.H{
+			"result":    "success",
+			"total":     result.Total,
+			"skipped":   result.Skipped,
+			"converted": result.Converted,
+			"failed":    result.Failed,
+			"message":   fmt.Sprintf("扫描 %d 张图片，转换 %d 张，跳过 %d 张，失败 %d 张", result.Total, result.Converted, result.Skipped, result.Failed),
+		})
+	}
+}
+
 func Chart(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 转换为文件系统路径

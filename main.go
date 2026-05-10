@@ -208,6 +208,7 @@ func main() {
 		admin.POST("/index", handler.AdminLogin(cfg))
 		admin.GET("/manager", middleware.RequireAdmin(cfg), handler.Manager(cfg))
 		admin.POST("/manager", middleware.RequireAdmin(cfg), handler.ManagerAction(cfg))
+		admin.POST("/batch-webp", middleware.RequireAdmin(cfg), handler.BatchWebP(cfg))
 		admin.GET("/chart", middleware.RequireAdmin(cfg), handler.Chart(cfg))
 		admin.GET("/history", middleware.RequireAdmin(cfg), handler.History(cfg))
 		admin.POST("/history", middleware.RequireAdmin(cfg), handler.HistoryDelete(cfg))
