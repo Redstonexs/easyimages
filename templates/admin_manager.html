@@ -162,6 +162,44 @@
                                 <input type="text" name="waterImg" class="form-control" value="{{.config.WaterImg}}" placeholder="/public/images/watermark.png">
                             </div>
                             <hr>
+                            <h4><i class="icon icon-shield"></i> 验证码设置</h4>
+                            <div class="form-group">
+                                <label>登录验证码</label>
+                                <select name="captcha" id="captchaSelect" class="form-control">
+                                    <option value="0" {{if eq .config.Captcha 0}}selected{{end}}>关闭</option>
+                                    <option value="1" {{if eq .config.Captcha 1}}selected{{end}}>开启</option>
+                                </select>
+                                <p class="help-block">开启后登录时需要输入验证码</p>
+                            </div>
+                            <div class="form-group" id="captchaTypeGroup" style="{{if eq .config.Captcha 0}}display:none;{{end}}">
+                                <label>验证码类型</label>
+                                <select name="captcha_type" id="captchaTypeSelect" class="form-control">
+                                    <option value="0" {{if eq .config.CaptchaType 0}}selected{{end}}>内置数学题</option>
+                                    <option value="1" {{if eq .config.CaptchaType 1}}selected{{end}}>Cloudflare Turnstile</option>
+                                    <option value="2" {{if eq .config.CaptchaType 2}}selected{{end}}>Google reCAPTCHA v3</option>
+                                </select>
+                            </div>
+                            <div id="turnstileKeys" style="{{if ne .config.CaptchaType 1}}display:none;{{end}}">
+                                <div class="form-group">
+                                    <label>Turnstile Site Key</label>
+                                    <input type="text" name="turnstile_site_key" class="form-control" value="{{.config.TurnstileSiteKey}}" placeholder="0x4AAAAAA...">
+                                </div>
+                                <div class="form-group">
+                                    <label>Turnstile Secret Key</label>
+                                    <input type="text" name="turnstile_secret_key" class="form-control" value="{{.config.TurnstileSecretKey}}" placeholder="0x4AAAAAA...">
+                                </div>
+                            </div>
+                            <div id="recaptchaKeys" style="{{if ne .config.CaptchaType 2}}display:none;{{end}}">
+                                <div class="form-group">
+                                    <label>reCAPTCHA Site Key</label>
+                                    <input type="text" name="recaptcha_site_key" class="form-control" value="{{.config.RecaptchaSiteKey}}" placeholder="6Lc...">
+                                </div>
+                                <div class="form-group">
+                                    <label>reCAPTCHA Secret Key</label>
+                                    <input type="text" name="recaptcha_secret_key" class="form-control" value="{{.config.RecaptchaSecretKey}}" placeholder="6Lc...">
+                                </div>
+                            </div>
+                            <hr>
                             <h4><i class="icon icon-cog"></i> 其他设置</h4>
                             <div class="form-group">
                                 <label>上传MIME类型限制</label>
@@ -214,6 +252,22 @@
                     }).show();
                 }
             });
+        });
+
+        $('#captchaSelect').on('change', function() {
+            if ($(this).val() === '1') {
+                $('#captchaTypeGroup').show();
+                $('#captchaTypeSelect').trigger('change');
+            } else {
+                $('#captchaTypeGroup').hide();
+                $('#turnstileKeys').hide();
+                $('#recaptchaKeys').hide();
+            }
+        });
+        $('#captchaTypeSelect').on('change', function() {
+            var v = $(this).val();
+            $('#turnstileKeys').toggle(v === '1');
+            $('#recaptchaKeys').toggle(v === '2');
         });
 
         $('#batchWebpBtn').on('click', function() {
