@@ -352,7 +352,12 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建存储目录失败"})
 			return
 		}
-		finalPath := filepath.Join(uploadDir, newFileName)
+		finalPath, finalPathErr := service.SanitizePath(filepath.Join(uploadDir, newFileName))
+		if finalPathErr != nil {
+			os.RemoveAll(chunkDir)
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的文件路径"})
+			return
+		}
 
 		// 合并分片到目标文件
 		outFile, err := os.Create(finalPath)

@@ -63,7 +63,14 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	storagePath = strings.Replace(storagePath, "d", fmt.Sprintf("%02d", now.Day()), 1)
 
 	// 完整的存储目录
-	uploadDir := filepath.Join(".", cfg.Path, storagePath)
+	uploadDir, dirErr := SanitizePath(filepath.Join(".", cfg.Path, storagePath))
+	if dirErr != nil {
+		return map[string]interface{}{
+			"result":  "failed",
+			"code":    400,
+			"message": "存储路径无效",
+		}
+	}
 
 	// 创建目录
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
@@ -75,7 +82,14 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	}
 
 	// 完整的文件路径
-	filePath := filepath.Join(uploadDir, newFileName)
+	filePath, pathErr := SanitizePath(filepath.Join(uploadDir, newFileName))
+	if pathErr != nil {
+		return map[string]interface{}{
+			"result":  "failed",
+			"code":    400,
+			"message": "无效的文件路径",
+		}
+	}
 
 	// 保存文件
 	if err := c.SaveUploadedFile(fileHeader, filePath); err != nil {
