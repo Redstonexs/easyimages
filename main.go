@@ -140,18 +140,34 @@ func main() {
 				return 0
 			}
 		},
-		"index": func(arr interface{}, i int) interface{} {
-			switch val := arr.(type) {
-			case []gin.H:
-				if i >= 0 && i < len(val) {
-					return val[i]
-				}
-			case []interface{}:
-				if i >= 0 && i < len(val) {
-					return val[i]
+		"index": func(arr interface{}, keys ...interface{}) interface{} {
+			if len(keys) == 0 {
+				return nil
+			}
+			current := arr
+			for _, key := range keys {
+				switch c := current.(type) {
+				case []gin.H:
+					if i, ok := key.(int); ok && i >= 0 && i < len(c) {
+						current = c[i]
+					} else {
+						return nil
+					}
+				case []interface{}:
+					if i, ok := key.(int); ok && i >= 0 && i < len(c) {
+						current = c[i]
+					} else {
+						return nil
+					}
+				case gin.H:
+					current = c[key.(string)]
+				case map[string]interface{}:
+					current = c[key.(string)]
+				default:
+					return nil
 				}
 			}
-			return nil
+			return current
 		},
 		"trimSuffix": func(suffix, s string) string {
 			return strings.TrimSuffix(s, suffix)
