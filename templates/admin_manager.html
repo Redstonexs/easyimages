@@ -200,6 +200,21 @@
                                 </div>
                             </div>
                             <hr>
+                            <h4><i class="icon icon-link"></i> 防盗链设置</h4>
+                            <div class="form-group">
+                                <label>防盗链</label>
+                                <select name="hotlink_protect" id="hotlinkSelect" class="form-control">
+                                    <option value="0" {{if eq .config.HotlinkProtect 0}}selected{{end}}>关闭</option>
+                                    <option value="1" {{if eq .config.HotlinkProtect 1}}selected{{end}}>开启</option>
+                                </select>
+                                <p class="help-block">开启后，仅允许白名单域名引用图片，直接访问（无Referer）不受限制</p>
+                            </div>
+                            <div class="form-group" id="hotlinkDomainsGroup" style="{{if eq .config.HotlinkProtect 0}}display:none;{{end}}">
+                                <label>白名单域名</label>
+                                <textarea name="hotlink_domains" class="form-control" rows="4" placeholder="example.com&#10;another.com">{{.config.HotlinkDomains}}</textarea>
+                                <p class="help-block">每行一个域名，白名单域名的子域名自动放行（如 example.com 会同时放行 www.example.com）</p>
+                            </div>
+                            <hr>
                             <h4><i class="icon icon-cog"></i> 其他设置</h4>
                             <div class="form-group">
                                 <label>上传MIME类型限制</label>
@@ -268,6 +283,10 @@
             var v = $(this).val();
             $('#turnstileKeys').toggle(v === '1');
             $('#recaptchaKeys').toggle(v === '2');
+        });
+
+        $('#hotlinkSelect').on('change', function() {
+            $('#hotlinkDomainsGroup').toggle($(this).val() === '1');
         });
 
         $('#batchWebpBtn').on('click', function() {

@@ -185,7 +185,9 @@ func main() {
 	// 图片静态文件服务
 	// cfg.Path 通常是 "/i/"，需要注册 "/i" 路由来匹配请求
 	imgRoutePath := strings.TrimRight(cfg.Path, "/")
-	r.Static(imgRoutePath, "."+cfg.Path)
+	imgGroup := r.Group(imgRoutePath)
+	imgGroup.Use(middleware.HotlinkProtection(cfg))
+	imgGroup.Static("/", "."+cfg.Path)
 
 	// favicon
 	r.StaticFile("/favicon.ico", "./public/images/favicon.ico")

@@ -135,6 +135,8 @@ type Config struct {
 	SetNotice           string   `json:"set_notice"`
 	Terms               string   `json:"terms"`
 	Update              string   `json:"update"`
+	HotlinkProtect      int      `json:"hotlink_protect"`
+	HotlinkDomains      string   `json:"hotlink_domains"`
 	Port                int      `json:"port"`
 
 	// 运行时配置

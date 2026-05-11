@@ -1039,6 +1039,13 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 			if v := c.PostForm("recaptcha_secret_key"); v != "" {
 				cfg.RecaptchaSecretKey = v
 			}
+			if v := c.PostForm("hotlink_protect"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil {
+					cfg.HotlinkProtect = n
+				}
+			}
+			// hotlink_domains 允许清空（textarea），始终更新
+			cfg.HotlinkDomains = c.PostForm("hotlink_domains")
 			// 注意：不更新 Password, User, Path, Port, HideKey 等敏感字段
 
 			if err := config.Save(cfg); err != nil {
