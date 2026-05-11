@@ -24,10 +24,11 @@ func Index(cfg *config.Config) gin.HandlerFunc {
 
 		captchaData := service.GenerateCaptcha(cfg)
 		data := gin.H{
-			"config":  cfg,
-			"version": config.Version,
-			"isAdmin": isAdmin,
-			"captcha": captchaData,
+			"config":    cfg,
+			"version":   config.Version,
+			"isAdmin":   isAdmin,
+			"captcha":   captchaData,
+			"mustLogin": cfg.MustLogin,
 		}
 		c.HTML(http.StatusOK, "index.html", data)
 	}

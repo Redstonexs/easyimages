@@ -38,6 +38,16 @@
             text-decoration: underline;
         }
     </style>
+    {{if and .captcha (ne .captcha.Type "disabled")}}
+    {{if eq .captcha.Type "turnstile"}}
+    <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin>
+    <link rel="preload" href="https://challenges.cloudflare.com/turnstile/v0/api.js" as="script" crossorigin>
+    {{else if eq .captcha.Type "recaptcha"}}
+    <link rel="preconnect" href="https://www.google.com" crossorigin>
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+    <link rel="preload" href="https://www.google.com/recaptcha/api.js" as="script" crossorigin>
+    {{end}}
+    {{end}}
 </head>
 <body>
     <div class="container">
@@ -68,37 +78,35 @@
                     <div id="turnstile-container"></div>
                     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
                     <script>
-                    function onTurnstileLoad() {
-                        if (typeof turnstile !== 'undefined') {
-                            turnstile.render('#turnstile-container', {
-                                sitekey: '{{.captcha.SiteKey}}',
-                                callback: function(token) {
-                                    document.getElementById('cf_turnstile_response').value = token;
-                                }
-                            });
-                        } else {
-                            setTimeout(onTurnstileLoad, 200);
-                        }
-                    }
-                    onTurnstileLoad();
+                    document.addEventListener('DOMContentLoaded', function() {
+                        (function tryRender() {
+                            if (typeof turnstile !== 'undefined') {
+                                turnstile.render('#turnstile-container', {
+                                    sitekey: '{{.captcha.SiteKey}}',
+                                    callback: function(token) {
+                                        document.getElementById('cf_turnstile_response').value = token;
+                                    }
+                                });
+                            } else { setTimeout(tryRender, 100); }
+                        })();
+                    });
                     </script>
                     {{else if eq .captcha.Type "recaptcha"}}
                     <input type="hidden" name="g_recaptcha_response" id="g_recaptcha_response">
                     <div id="recaptcha-container"></div>
-                    <script src="https://www.google.com/recaptcha/api.js?render={{.captcha.SiteKey}}"></script>
+                    <script src="https://www.google.com/recaptcha/api.js?render={{.captcha.SiteKey}}" async defer></script>
                     <script>
-                    function onRecaptchaLoad() {
-                        if (typeof grecaptcha !== 'undefined' && grecaptcha.ready) {
-                            grecaptcha.ready(function() {
-                                grecaptcha.execute('{{.captcha.SiteKey}}', {action: 'login'}).then(function(token) {
-                                    document.getElementById('g_recaptcha_response').value = token;
+                    document.addEventListener('DOMContentLoaded', function() {
+                        (function tryExecute() {
+                            if (typeof grecaptcha !== 'undefined' && grecaptcha.ready) {
+                                grecaptcha.ready(function() {
+                                    grecaptcha.execute('{{.captcha.SiteKey}}', {action: 'login'}).then(function(token) {
+                                        document.getElementById('g_recaptcha_response').value = token;
+                                    });
                                 });
-                            });
-                        } else {
-                            setTimeout(onRecaptchaLoad, 200);
-                        }
-                    }
-                    onRecaptchaLoad();
+                            } else { setTimeout(tryExecute, 100); }
+                        })();
+                    });
                     </script>
                     {{end}}
                 </div>

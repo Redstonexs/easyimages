@@ -64,6 +64,16 @@
         .status-error { background: #e74c3c; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
     </style>
+    {{if and .captcha (ne .captcha.Type "disabled")}}
+    {{if eq .captcha.Type "turnstile"}}
+    <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin>
+    <link rel="preload" href="https://challenges.cloudflare.com/turnstile/v0/api.js" as="script" crossorigin>
+    {{else if eq .captcha.Type "recaptcha"}}
+    <link rel="preconnect" href="https://www.google.com" crossorigin>
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+    <link rel="preload" href="https://www.google.com/recaptcha/api.js" as="script" crossorigin>
+    {{end}}
+    {{end}}
 </head>
 <body>
     <div class="container" style="max-width: 800px; margin-top: 50px;">
@@ -134,35 +144,10 @@
                         <input type="hidden" id="login_cf_turnstile_response">
                         <div id="login-turnstile-container"></div>
                         <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-                        <script>
-                        function onTurnstileLoad() {
-                            if (typeof turnstile !== 'undefined') {
-                                turnstile.render('#login-turnstile-container', {
-                                    sitekey: '{{.captcha.SiteKey}}',
-                                    callback: function(token) {
-                                        document.getElementById('login_cf_turnstile_response').value = token;
-                                    }
-                                });
-                            } else { setTimeout(onTurnstileLoad, 200); }
-                        }
-                        onTurnstileLoad();
-                        </script>
                         {{else if eq .captcha.Type "recaptcha"}}
                         <input type="hidden" id="login_g_recaptcha_response">
                         <div id="login-recaptcha-container"></div>
-                        <script src="https://www.google.com/recaptcha/api.js?render={{.captcha.SiteKey}}"></script>
-                        <script>
-                        function onRecaptchaLoad() {
-                            if (typeof grecaptcha !== 'undefined' && grecaptcha.ready) {
-                                grecaptcha.ready(function() {
-                                    grecaptcha.execute('{{.captcha.SiteKey}}', {action: 'login'}).then(function(token) {
-                                        document.getElementById('login_g_recaptcha_response').value = token;
-                                    });
-                                });
-                            } else { setTimeout(onRecaptchaLoad, 200); }
-                        }
-                        onRecaptchaLoad();
-                        </script>
+                        <script src="https://www.google.com/recaptcha/api.js?render={{.captcha.SiteKey}}" async defer></script>
                         {{end}}
                     </div>
                     {{end}}
@@ -206,10 +191,63 @@
         document.getElementById('maxSizeDisplay').textContent = formatSize(MAX_SIZE);
 
         // ===== 登录 =====
+        var turnstileRendered = false;
+        var builtinCaptchaPrefetched = null;
+
+        function renderLoginCaptcha() {
+            {{if and .captcha (ne .captcha.Type "disabled")}}
+            {{if eq .captcha.Type "turnstile"}}
+            if (turnstileRendered) { turnstile.reset('#login-turnstile-container'); return; }
+            (function tryRender() {
+                if (typeof turnstile !== 'undefined') {
+                    turnstile.render('#login-turnstile-container', {
+                        sitekey: '{{.captcha.SiteKey}}',
+                        callback: function(token) {
+                            document.getElementById('login_cf_turnstile_response').value = token;
+                        }
+                    });
+                    turnstileRendered = true;
+                } else { setTimeout(tryRender, 100); }
+            })();
+            {{else if eq .captcha.Type "recaptcha"}}
+            (function tryExecute() {
+                if (typeof grecaptcha !== 'undefined' && grecaptcha.ready) {
+                    grecaptcha.ready(function() {
+                        grecaptcha.execute('{{.captcha.SiteKey}}', {action: 'login'}).then(function(token) {
+                            document.getElementById('login_g_recaptcha_response').value = token;
+                        });
+                    });
+                } else { setTimeout(tryExecute, 100); }
+            })();
+            {{else if eq .captcha.Type "builtin"}}
+            if (builtinCaptchaPrefetched) {
+                document.getElementById('login-captcha-question').textContent = builtinCaptchaPrefetched.question;
+                document.getElementById('login_captcha_token').value = builtinCaptchaPrefetched.token;
+                document.getElementById('login_captcha_answer').value = '';
+                builtinCaptchaPrefetched = null;
+            } else {
+                refreshLoginCaptcha();
+            }
+            {{end}}
+            {{end}}
+        }
+
+        {{if and .captcha (eq .captcha.Type "builtin") (eq .mustLogin 1)}}
+        (function() {
+            fetch('/api/captcha')
+                .then(function(r) { return r.json(); })
+                .then(function(data) { builtinCaptchaPrefetched = data; })
+                .catch(function() {});
+        })();
+        {{end}}
+
         $(document).ready(function() {
             $('#adminBtn').click(function() {
                 {{if .isAdmin}} window.location.href = '/admin/manager';
                 {{else}} $('#loginModal').modal('show'); {{end}}
+            });
+            $('#loginModal').on('shown.zui.modal', function() {
+                renderLoginCaptcha();
             });
             $('#loginBtn').click(function() {
                 var u = $('#loginUser').val(), p = $('#loginPass').val();
