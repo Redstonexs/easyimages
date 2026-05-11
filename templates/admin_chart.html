@@ -52,7 +52,7 @@
                         <h3 class="panel-title"><i class="icon icon-calendar"></i> 今日上传</h3>
                     </div>
                     <div class="panel-body text-center">
-                        {{$last := index .dailyStats (len .dailyStats | minus 1)}}<h2>{{index $last "Count"}}</h2>
+                        {{$last := index .dailyStats (minus (len .dailyStats) 1)}}<h2>{{index $last "Count"}}</h2>
                     </div>
                 </div>
             </div>
