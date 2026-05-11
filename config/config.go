@@ -8,9 +8,8 @@ import (
 	"time"
 )
 
-const (
-	Version = "3.0.0"
-)
+// Version is the application version, overridden at build time via ldflags.
+var Version = "3.0.0"
 
 type Config struct {
 	Title               string   `json:"title"`

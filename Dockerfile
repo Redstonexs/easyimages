@@ -1,5 +1,7 @@
 FROM golang:1.21-alpine AS builder
 
+ARG VERSION=3.0.0
+
 # 安装依赖
 RUN apk add --no-cache gcc musl-dev
 
@@ -18,8 +20,8 @@ COPY . .
 # 删除可能存在的默认配置文件（避免干扰迁移检测）
 RUN rm -f config/config.json config/config.guest.json config/api_key.json config/install.lock
 
-# 编译
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o easyimage .
+# 编译（通过ldflags注入版本号）
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w -X easyimage/config.Version=${VERSION}" -o easyimage .
 
 # 最终镜像
 FROM alpine:latest
