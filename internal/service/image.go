@@ -236,7 +236,7 @@ func AddWatermark(imgPath string, cfg *config.Config) error {
 func createTextWatermark(text string, fontSize int, clr color.RGBA) image.Image {
 	// 计算文字宽度（近似值）
 	charWidth := fontSize * 6 / 10
-	textWidth := len(text) * charWidth + 20
+	textWidth := len(text)*charWidth + 20
 	textHeight := fontSize + 20
 
 	// 创建透明背景
@@ -601,19 +601,25 @@ func ConvertToWebP(imgPath string, cfg *config.Config) error {
 		return nil
 	}
 
-	// 生成webp存储路径
-	// 原始路径如: ./i/2026/05/08/xxx.jpg
-	// webp路径如: ./i/webp/2026/05/08/xxx.webp
-	// 注意: filepath.Join(".", "/i/", ...) 在 Linux 上会产生 "/i/..."（绝对路径，丢失 "." 前缀），
-	// 因此必须用 filepath.Clean 统一后再做 TrimPrefix。
-	cleanImgPath := filepath.Clean(imgPath)
-	cleanPrefix := filepath.Clean("." + cfg.Path) // "./i"
-	if !strings.HasPrefix(cleanImgPath, cleanPrefix+string(filepath.Separator)) {
-		return fmt.Errorf("image path %q is not under storage path %q", imgPath, cleanPrefix)
+	// Upload paths are sanitized to absolute paths; compare absolute paths and
+	// derive the mirror path with filepath.Rel to keep the storage boundary check.
+	storageDir, err := filepath.Abs("." + cfg.Path)
+	if err != nil {
+		return fmt.Errorf("invalid storage path %q: %w", cfg.Path, err)
 	}
-	relToStorage := cleanImgPath[len(cleanPrefix)+1:] // "2026/05/08/xxx.jpg"
+	cleanImgPath, err := filepath.Abs(imgPath)
+	if err != nil {
+		return fmt.Errorf("invalid image path %q: %w", imgPath, err)
+	}
+	relToStorage, err := filepath.Rel(storageDir, cleanImgPath)
+	if err != nil {
+		return fmt.Errorf("image path %q is not under storage path %q: %w", imgPath, storageDir, err)
+	}
+	if relToStorage == ".." || strings.HasPrefix(relToStorage, ".."+string(filepath.Separator)) || filepath.IsAbs(relToStorage) {
+		return fmt.Errorf("image path %q is not under storage path %q", imgPath, storageDir)
+	}
 
-	webpDir := filepath.Join(cleanPrefix, "webp") // "./i/webp"
+	webpDir := filepath.Join(storageDir, "webp")
 	webpPath := filepath.Join(webpDir, strings.TrimSuffix(relToStorage, filepath.Ext(relToStorage))+".webp")
 
 	// 确保目录存在
@@ -671,10 +677,10 @@ func GetWebPURL(originalPath string, cfg *config.Config) string {
 
 // BatchWebPResult 批量 WebP 转换结果
 type BatchWebPResult struct {
-	Total    int `json:"total"`    // 扫描到的图片总数
-	Skipped  int `json:"skipped"`  // 已有 WebP 或不支持的文件数
-	Converted int  `json:"converted"` // 成功转换数
-	Failed   int `json:"failed"`   // 转换失败数
+	Total     int `json:"total"`     // 扫描到的图片总数
+	Skipped   int `json:"skipped"`   // 已有 WebP 或不支持的文件数
+	Converted int `json:"converted"` // 成功转换数
+	Failed    int `json:"failed"`    // 转换失败数
 }
 
 // BatchConvertToWebP 扫描存量图片并批量生成 WebP 版本。

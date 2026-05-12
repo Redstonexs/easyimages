@@ -2,102 +2,54 @@
 
 ## What this is
 
-EasyImage — a Go rewrite of a PHP image hosting service (图床). Single-binary Gin web server, HTML templates, file-based storage (no database). Stores images under `i/` with date-based subdirectories.
+EasyImage is a Go rewrite of a PHP image host (图床): one Gin binary, Go HTML templates, file-based config/storage, no database. Runtime images live under `i/`; runtime logs live under `admin/logs/`.
 
-## Build and run
+## Commands
 
-```bash
-go build -o easyimage          # build
-./easyimage                    # runs on :8080 (configurable in config/config.json)
-docker-compose up -d           # Docker build + run
-```
+- Build the server from the repo root: `go build -o easyimage .`.
+- Run locally: `./easyimage` (or `./easyimage.exe` on Windows). It listens on `:8080` unless `config/config.json` sets `port`.
+- Docker run/build: `docker-compose up -d`.
+- Static check: `go vet ./...`. There is no repo linter, formatter config, task runner, or test suite; `go test ./...` is only a compile/no-test sanity check.
+- Manual PHP config converter: `go run ./cmd/php2json config/config.php config/config.json`.
+- Migration status utility: `go run ./cmd/migrate_test`.
 
-No tests, no linter, no formatter config exist in this repo. `go vet ./...` is the only available static check.
+## Runtime state
 
-Docker build uses `CGO_ENABLED=0` — keep it that way.
+- `config/config.json`, `config/config.guest.json`, `config/api_key.json`, `config/install.lock`, `config/php_backup/`, `admin/logs/`, and `i/` are gitignored runtime state. Do not commit local values from them.
+- PHP source config files in `config/*.php` are versioned for migration. Startup runs `checkAndMigrate()` before `config.Load()` and skips migration when `config/config.json` is an installed or non-default Go config.
+- Dockerfile intentionally removes generated JSON config and install locks during image build so first container start can auto-detect PHP configs.
 
-## Architecture
+## Architecture notes
 
-- `main.go` — entrypoint, route registration, template function registration, auto-migration logic
-- `config/` — config loading (`config.go`), PHP migration (`php_migrate.go`), PHP config files kept for migration
-- `internal/handler/` — all HTTP handlers in a single `handler.go` file
-- `internal/middleware/` — auth middleware (`CheckLogin`, `RequireAdmin`)
-- `internal/service/` — business logic: `service.go` (auth, file ops, crypto), `image.go` (upload processing, watermark, compress), `captcha.go` (builtin/turnstile/recaptcha), `legacy_password.go` (SHA256 compat)
-- `templates/` — 11 Go HTML templates loaded via `r.LoadHTMLGlob("templates/*")`
-- `public/` — static assets served at `/public`
-- `i/` — image storage, served at `/i` (route registered as `strings.TrimRight(cfg.Path, "/")`)
-- `cmd/php2json/` — standalone tool to convert PHP config to JSON
-- `cmd/migrate_test/` — migration test utility
+- `main.go` is the wiring file: auto-migration, config load, directory creation, Gin routes, template funcs, static file routes, and server timeouts.
+- `config/config.go` owns the config singleton. Use `config.Load()` at startup, `config.Get()` only after load, and `config.Save(cfg)` for writes. Handlers receive `*config.Config` closures; do not introduce new global config reads in handlers.
+- `internal/handler/handler.go` contains nearly all HTTP handlers. `internal/service/` owns auth, file operations, image processing, captcha, and legacy password compatibility.
+- Real upload API route is `POST /api/index`; `README_GO.md` still shows legacy `/api/index.php` in one example.
+- Image URLs use `cfg.Path` such as `/i/`; filesystem access needs the local prefix (`"." + cfg.Path`). Be careful with `filepath.Join(".", cfg.Path, ...)` because a leading slash in `cfg.Path` can discard the dot on Unix.
+- Static image serving registers `strings.TrimRight(cfg.Path, "/")` and wraps it with `middleware.HotlinkProtection(cfg)`.
 
-## Key conventions
+## Templates
 
-- Config is JSON (`config/config.json`), gitignored. PHP config files (`config.php`, `config.guest.php`, `api_key.php`) are version-controlled for migration.
-- Config singleton: use `config.Get()` to read, `config.Save(cfg)` to write. Config is loaded once at startup.
-- Handlers receive `*config.Config` as a closure parameter — do not use globals.
-- Custom template functions are registered in `main.go` (`format_size`, `mul`, `div`, `minus`, `len`, `index`, `trimSuffix`, `now`). If you add a new template function, register it there.
-- Version is in `config/config.go` (`var Version`). It is a `var` (not `const`) so Docker builds can override it via `-ldflags -X`. The release workflow auto-bumps it.
-- Image paths in config use URL format (`/i/`), filesystem paths require `./i/` prefix. The handlers convert with `"." + cfg.Path`.
-- Password hashing: new passwords use bcrypt (`service.HashPassword`), legacy PHP passwords use SHA256 (`legacy_password.go`). Both are checked in `ValidateLogin`.
-- Auth is cookie-based (`auth` cookie with JSON-encoded `[user, password]`).
+- Templates are loaded with `r.LoadHTMLGlob("templates/*")`; any new template function must be registered in `main.go` before this call.
+- The custom `index` template function in `main.go` supports chained slice/map access such as `{{index .dailyStats 5 "Count"}}`; do not replace it with a simple int-only helper.
+- Go template pipes pass the piped value as the last argument: `len .list | minus 1` means `minus(1, len)`. Use `minus (len .list) 1` when computing `len - 1`.
+- The index page receives both `.config` and `.mustLogin`; existing captcha/login template logic relies on `.mustLogin`.
 
-## Custom template `index` function
+## Auth and security
 
-The repo overrides Go's built-in `index` with a variadic version in `main.go` that supports:
-- Slice indexing: `index .dailyStats 5` (int key on `[]gin.H` or `[]interface{}`)
-- Map key lookup: `index $last "Count"` (string key on `gin.H` or `map[string]interface{}`)
-- Chained access: `index .dailyStats 5 "Count"` (slice then map in one call)
+- Sessions are in-memory tokens in the `session` cookie (`service.sessionStore`, 14-day max age). Process restarts invalidate sessions.
+- New passwords are bcrypt (`service.HashPassword`); migrated PHP passwords can still validate as SHA256 through `legacy_password.go`.
+- Admin settings updates in `ManagerAction` intentionally do not change sensitive fields like `Password`, `User`, `Path`, `Port`, and `HideKey`.
+- Captcha modes are builtin math (`captcha_type=0`), Cloudflare Turnstile (`1`), and reCAPTCHA (`2`). Missing external captcha keys fall back to builtin; builtin tokens are HMAC-signed from the config password and expire after 5 minutes.
 
-Without this, `{{index $map "key"}}` would fail because the custom function only accepted `int` keys.
+## Image processing
 
-## Go template pipe semantics (critical gotcha)
-
-`x | f args` passes `x` as the **last** argument: `len .list | minus 1` = `minus(1, 30)` = `-29`, **not** `29`.
-
-To compute `len - 1`, use explicit call syntax: `minus (len .list) 1`. Never pipe into `minus` when the piped value should be the first operand.
-
-## WebP conversion
-
-- Controlled by `webp_convert` (0/1) and `webp_quality` (default 80) in config
-- WebP files stored in `i/webp/` mirroring original directory structure (e.g., `./i/webp/2026/05/08/xxx.webp`)
-- WebP URLs returned in upload response as `webp_url` field
-- Skips already-webp files and animated GIFs
-- WebP files are served by the existing `/i` static route (e.g., `/i/webp/2026/05/08/xxx.webp`)
-
-## Captcha
-
-- Three types: builtin (math question), Cloudflare Turnstile, Google reCAPTCHA v3
-- Controlled by `captcha` (0/1) and `captcha_type` (0/1/2) in config
-- Builtin captcha tokens are HMAC-signed, expire in 5 minutes
-- External captcha scripts (`turnstile/v0/api.js`, `recaptcha/api.js`) are preloaded via `<link rel="preload">` in `<head>` when captcha is enabled
-- On the index page, captcha widgets are lazily initialized when the login modal opens (not on page load)
-- When `mustLogin=1`, builtin captcha data is pre-fetched in the background on page load
+- WebP conversion is controlled by `webp_convert` and `webp_quality`; it requires the external `cwebp` CLI. Docker installs `libwebp-tools`, but local runs need `cwebp` on `PATH`.
+- WebP files are stored under `i/webp/` mirroring the original directory tree and are returned as `webp_url` when present. Existing `.webp` files and animated GIFs are skipped.
+- Batch WebP generation is `POST /admin/batch-webp` and requires admin auth plus `webp_convert=1`.
 
 ## Release workflow
 
-- `Version` in `config/config.go` is the single source of truth
-- `.github/workflows/release.yml` — manually triggered, bumps version in `config/config.go`, commits, tags `vX.Y.Z`, creates GitHub Release
-- Tag push triggers `.github/workflows/docker-image.yml` which builds Docker image with `VERSION` build arg passed via `-ldflags -X`
-- Docker build: `--build-arg VERSION=X.Y.Z` overrides the default in the Dockerfile
-
-## Admin routes
-
-- `/admin/index` — login page
-- `/admin/manager` — config management
-- `/admin/chart` — statistics
-- `/admin/history` — upload history
-- `/admin/urllist` — image URL list with pagination and WebP URLs
-- `/admin/filer` — file management
-- `/api/urllist` — JSON API for image URL list
-
-## Gotchas
-
-- Template files must be UTF-8 without BOM. Corrupted encoding causes blank pages (silent template parse failure).
-- `cfg.Path` is `/i/` (URL path). When calling `os.Stat`, `filepath.Walk`, or `filepath.Glob`, prepend `.` to get filesystem path (`./i/`).
-- The `i/` directory and `config/config.json` are gitignored — they exist at runtime but not in the repo.
-- Docker image deletes `config.json` during build to allow auto-migration detection on first run.
-- No `go.sum` regeneration needed unless `go.mod` changes — run `go mod tidy` if you modify dependencies.
-- Templates must use `{{.mustLogin}}` (passed from handler) to check login-only mode; `{{.config.MustLogin}}` also works since config is passed directly.
-
-## File count
-
-~9 Go source files, 11 HTML templates, no tests.
+- `config.Version` in `config/config.go` is a `var` so Docker builds can override it with `-ldflags -X easyimage/config.Version=...`.
+- `.github/workflows/release.yml` manually bumps `config.Version`, commits `release: vX.Y.Z`, tags `vX.Y.Z`, and pushes to `master`.
+- `.github/workflows/docker-image.yml` builds Docker images on `master`, tags, and manual dispatch; it passes `VERSION` as a Docker build arg. Keep Docker builds `CGO_ENABLED=0`.
