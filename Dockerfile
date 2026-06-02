@@ -1,3 +1,14 @@
+FROM node:22-alpine AS frontend
+
+WORKDIR /build
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+COPY vite.config.ts tsconfig.json ./
+COPY web ./web
+RUN npm run build
+
 FROM golang:1.21-alpine AS builder
 
 ARG VERSION=3.0.0
@@ -16,6 +27,7 @@ RUN go mod download
 
 # 复制源代码
 COPY . .
+COPY --from=frontend /build/public/dist ./public/dist
 
 # 删除可能存在的默认配置文件（避免干扰迁移检测）
 RUN rm -f config/config.json config/config.guest.json config/api_key.json config/install.lock

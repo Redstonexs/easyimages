@@ -23,12 +23,25 @@ func Index(cfg *config.Config) gin.HandlerFunc {
 		isAdmin := service.IsAdmin(c)
 
 		captchaData := service.GenerateCaptcha(cfg)
+		frontend := gin.H{
+			"config": gin.H{
+				"title":       cfg.Title,
+				"description": cfg.Description,
+				"max_size":    cfg.MaxSize,
+				"api_status":  cfg.APIStatus,
+			},
+			"version":    config.Version,
+			"is_admin":   isAdmin,
+			"must_login": cfg.MustLogin,
+			"captcha":    captchaData,
+		}
 		data := gin.H{
 			"config":    cfg,
 			"version":   config.Version,
 			"isAdmin":   isAdmin,
 			"captcha":   captchaData,
 			"mustLogin": cfg.MustLogin,
+			"frontend":  frontend,
 		}
 		c.HTML(http.StatusOK, "index.html", data)
 	}
@@ -100,63 +113,29 @@ func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 
 func List(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		listDate := cfg.ListDate
-		datePath := c.DefaultQuery("date", time.Now().Format("2006/01/02/"))
-
-		// 限制日期范围
-		if datePath < time.Now().AddDate(0, 0, -listDate).Format("2006/01/02/") {
-			datePath = time.Now().Format("2006/01/02/")
-		}
-
-		num := c.DefaultQuery("num", fmt.Sprintf("%d", cfg.ListNumber))
-		limit, err := strconv.Atoi(num)
-		if err != nil || limit <= 0 || limit > 500 {
-			limit = cfg.ListNumber
-		}
-		search := c.Query("search")
-
-		// 验证 search 参数只包含字母数字（防止 glob 注入）
-		if search != "" {
-			for _, ch := range search {
-				if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid search parameter"})
-					return
-				}
-			}
-		}
-
-		// 获取文件列表
-		basePath := "." + cfg.Path + datePath
-		if search != "" {
-			basePath += "*." + search
-		} else {
-			basePath += "*.*"
-		}
-
-		files, allUpload := service.GetFileListLimited(basePath, cfg.ShowSort, limit)
-
-		// 生成日期链接数据
-		yesterday := time.Now().AddDate(0, 0, -1).Format("2006/01/02/")
-		dateLinks := make([]gin.H, 0, listDate)
-		for i := 2; i <= listDate; i++ {
-			date := time.Now().AddDate(0, 0, -i).Format("2006/01/02/")
-			dateLinks = append(dateLinks, gin.H{
-				"Date":  date,
-				"Label": fmt.Sprintf("%d天前", i),
-			})
+		initial, err := imageListPayload(c, cfg)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 
 		c.HTML(http.StatusOK, "list.html", gin.H{
-			"config":    cfg,
-			"files":     files,
-			"date":      datePath,
-			"num":       num,
-			"allUpload": allUpload,
-			"search":    search,
-			"listDate":  listDate,
-			"yesterday": yesterday,
-			"dateLinks": dateLinks,
+			"config":  cfg,
+			"initial": initial,
 		})
+	}
+}
+
+// ImageListAPI returns public gallery data for frontend rendering and caching.
+func ImageListAPI(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		payload, err := imageListPayload(c, cfg)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		setFrontendAPIHeaders(c)
+		c.JSON(http.StatusOK, payload)
 	}
 }
 

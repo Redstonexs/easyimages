@@ -40,3 +40,4 @@ i/*
 # Temp
 *.tmp
 *.log
+node_modules
