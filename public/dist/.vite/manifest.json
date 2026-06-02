@@ -1,6 +1,6 @@
 {
-  "_app-CIZ5qtxn.js": {
-    "file": "assets/app-CIZ5qtxn.js",
+  "_app-CQ0jCQTk.js": {
+    "file": "assets/app-CQ0jCQTk.js",
     "name": "app",
     "css": [
       "assets/app-mMNm0_5Q.css"
@@ -10,25 +10,37 @@
     "file": "assets/app-mMNm0_5Q.css",
     "src": "_app-mMNm0_5Q.css"
   },
+  "web/src/entries/admin.ts": {
+    "file": "assets/admin-BXqN6rxZ.js",
+    "name": "admin",
+    "src": "web/src/entries/admin.ts",
+    "isEntry": true,
+    "imports": [
+      "_app-CQ0jCQTk.js"
+    ],
+    "css": [
+      "assets/admin-CACDmUMZ.css"
+    ]
+  },
   "web/src/entries/gallery.ts": {
-    "file": "assets/gallery-D3k5_rre.js",
+    "file": "assets/gallery-BfDMc0bU.js",
     "name": "gallery",
     "src": "web/src/entries/gallery.ts",
     "isEntry": true,
     "imports": [
-      "_app-CIZ5qtxn.js"
+      "_app-CQ0jCQTk.js"
     ],
     "css": [
-      "assets/gallery-B2vcrbVm.css"
+      "assets/gallery-DYyRCM7U.css"
     ]
   },
   "web/src/entries/upload.ts": {
-    "file": "assets/upload-F7as5lAZ.js",
+    "file": "assets/upload-CL4I-CYq.js",
     "name": "upload",
     "src": "web/src/entries/upload.ts",
     "isEntry": true,
     "imports": [
-      "_app-CIZ5qtxn.js"
+      "_app-CQ0jCQTk.js"
     ],
     "css": [
       "assets/upload-C2oUZz4Z.css"

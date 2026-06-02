@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -864,18 +863,7 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 
 func Manager(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 转换为文件系统路径
-		fsPath := "." + cfg.Path
-
-		// 单次遍历统计文件数和总大小
-		stats := service.CollectDirStats(fsPath)
-
-		c.HTML(http.StatusOK, "admin_manager.html", gin.H{
-			"config":     cfg,
-			"totalFiles": stats.TotalFiles,
-			"usedSpace":  stats.TotalSize,
-			"version":    config.Version,
-		})
+		c.HTML(http.StatusOK, "admin_manager.html", adminShellData(c, cfg, "manager"))
 	}
 }
 
@@ -1078,99 +1066,14 @@ func BatchWebP(cfg *config.Config) gin.HandlerFunc {
 
 func Chart(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 转换为文件系统路径
-		fsPath := "." + cfg.Path
-
-		// 单次遍历收集文件数、总大小和按扩展名统计
-		stats := service.CollectDirStats(fsPath)
-
-		// 获取最近30天的上传统计
-		dailyStats := make([]gin.H, 0, 30)
-		for i := 0; i < 30; i++ {
-			date := time.Now().AddDate(0, 0, -i)
-			datePath := date.Format("2006/01/02/")
-			count := service.GetFileCount(fsPath + datePath + "*.*")
-			dailyStats = append(dailyStats, gin.H{
-				"Date":  date.Format("01-02"),
-				"Count": count,
-			})
-		}
-
-		// 反转顺序（从旧到新）
-		slices.Reverse(dailyStats)
-
-		c.HTML(http.StatusOK, "admin_chart.html", gin.H{
-			"config":      cfg,
-			"totalFiles":  stats.TotalFiles,
-			"usedSpace":   stats.TotalSize,
-			"dailyStats":  dailyStats,
-			"formatStats": stats.ByExt,
-		})
+		c.HTML(http.StatusOK, "admin_chart.html", adminShellData(c, cfg, "chart"))
 	}
 }
 
 // History 历史上传图片（原广场功能）
 func History(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		listDate := cfg.ListDate
-		datePath := c.DefaultQuery("date", time.Now().Format("2006/01/02/"))
-
-		// 限制日期范围
-		if datePath < time.Now().AddDate(0, 0, -listDate).Format("2006/01/02/") {
-			datePath = time.Now().Format("2006/01/02/")
-		}
-
-		// 确保日期路径格式正确（末尾加/）
-		if !strings.HasSuffix(datePath, "/") {
-			datePath += "/"
-		}
-
-		search := c.Query("search")
-
-		// 验证 search 参数只包含字母数字（防止 glob 注入）
-		if search != "" {
-			for _, ch := range search {
-				if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid search parameter"})
-					return
-				}
-			}
-		}
-
-		// 转换为文件系统路径
-		fsPath := "." + cfg.Path
-
-		// 获取文件列表
-		basePath := fsPath + datePath
-		if search != "" {
-			basePath += "*." + search
-		} else {
-			basePath += "*.*"
-		}
-
-		files, allUpload := service.GetFileListLimited(basePath, cfg.ShowSort, cfg.ListNumber)
-
-		// 生成日期链接数据
-		yesterday := time.Now().AddDate(0, 0, -1).Format("2006/01/02/")
-		dateLinks := make([]gin.H, 0, listDate)
-		for i := 2; i <= listDate; i++ {
-			date := time.Now().AddDate(0, 0, -i)
-			dateLinks = append(dateLinks, gin.H{
-				"Date":  date.Format("2006/01/02/"),
-				"Label": fmt.Sprintf("%d天前", i),
-			})
-		}
-
-		c.HTML(http.StatusOK, "admin_history.html", gin.H{
-			"config":    cfg,
-			"files":     files,
-			"date":      datePath,
-			"allUpload": allUpload,
-			"search":    search,
-			"listDate":  listDate,
-			"yesterday": yesterday,
-			"dateLinks": dateLinks,
-		})
+		c.HTML(http.StatusOK, "admin_history.html", adminShellData(c, cfg, "history"))
 	}
 }
 
@@ -1207,127 +1110,14 @@ func HistoryDelete(cfg *config.Config) gin.HandlerFunc {
 
 func Filer(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		reqPath := c.DefaultQuery("path", cfg.Path)
-
-		// 验证路径安全性（filepath.Clean 规范化后检查 ".."，防止 Windows 反斜杠绕过）
-		reqPath, err := service.ValidateURLPath(reqPath, cfg.Path)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
-			return
-		}
-
-		// 确保路径以/结尾
-		if !strings.HasSuffix(reqPath, "/") {
-			reqPath += "/"
-		}
-
-		// 获取目录列表和文件列表
-		dirs := service.GetDirList("." + reqPath)
-		files := service.GetFileList("."+reqPath+"*.*", cfg.ShowSort)
-
-		// 计算上级目录
-		parentPath := ""
-		if reqPath != cfg.Path {
-			parentPath = filepath.Dir(strings.TrimSuffix(reqPath, "/"))
-			if !strings.HasSuffix(parentPath, "/") {
-				parentPath += "/"
-			}
-			// 确保上级目录不超出允许范围
-			if !strings.HasPrefix(parentPath, cfg.Path) {
-				parentPath = cfg.Path
-			}
-		}
-
-		c.HTML(http.StatusOK, "admin_filer.html", gin.H{
-			"config":     cfg,
-			"files":      files,
-			"dirs":       dirs,
-			"path":       reqPath,
-			"parentPath": parentPath,
-		})
+		c.HTML(http.StatusOK, "admin_filer.html", adminShellData(c, cfg, "filer"))
 	}
 }
 
 // ImageURLList 图片URL列表页面
 func ImageURLList(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		reqPath := c.DefaultQuery("path", cfg.Path)
-		pageStr := c.DefaultQuery("page", "1")
-		pageSizeStr := c.DefaultQuery("page_size", "50")
-
-		page, _ := strconv.Atoi(pageStr)
-		if page < 1 {
-			page = 1
-		}
-		pageSize, _ := strconv.Atoi(pageSizeStr)
-		if pageSize < 1 || pageSize > 200 {
-			pageSize = 50
-		}
-
-		// 验证路径安全性（filepath.Clean 规范化后检查 ".."，防止 Windows 反斜杠绕过）
-		reqPath, err := service.ValidateURLPath(reqPath, cfg.Path)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
-			return
-		}
-		if !strings.HasSuffix(reqPath, "/") {
-			reqPath += "/"
-		}
-
-		fsPath := "." + reqPath
-
-		// 获取所有文件并过滤图片（GetFileListRecursive 已跳过系统内部目录）
-		allFiles := service.GetFileListRecursive(fsPath)
-		var imageFiles []string
-		for _, name := range allFiles {
-			// 排除webp目录下的重复文件和非图片文件
-			if !strings.HasPrefix(name, "webp/") && service.IsImageFile(name) {
-				imageFiles = append(imageFiles, name)
-			}
-		}
-		allFiles = imageFiles
-
-		// 计算分页
-		total := len(allFiles)
-		totalPages := (total + pageSize - 1) / pageSize
-		start := (page - 1) * pageSize
-		end := start + pageSize
-		if start > total {
-			start = total
-		}
-		if end > total {
-			end = total
-		}
-
-		// 构建文件URL列表
-		type FileInfo struct {
-			Name    string `json:"name"`
-			URL     string `json:"url"`
-			WebPURL string `json:"webp_url,omitempty"`
-		}
-
-		files := make([]FileInfo, 0, end-start)
-		for _, name := range allFiles[start:end] {
-			relativePath := reqPath + name
-			url := cfg.Domain + relativePath
-			webpURL := service.GetWebPURL(relativePath, cfg)
-
-			files = append(files, FileInfo{
-				Name:    name,
-				URL:     url,
-				WebPURL: webpURL,
-			})
-		}
-
-		c.HTML(http.StatusOK, "admin_urllist.html", gin.H{
-			"config":     cfg,
-			"files":      files,
-			"path":       reqPath,
-			"page":       page,
-			"pageSize":   pageSize,
-			"total":      total,
-			"totalPages": totalPages,
-		})
+		c.HTML(http.StatusOK, "admin_urllist.html", adminShellData(c, cfg, "urllist"))
 	}
 }
 

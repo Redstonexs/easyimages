@@ -32,7 +32,9 @@ export interface UploadResult {
 
 export interface GalleryFile {
   name: string
+  path: string
   url: string
+  thumb_url: string
   webp_url?: string
   info_url: string
   down_url: string
@@ -49,4 +51,87 @@ export interface GalleryBootstrap {
   yesterday: string
   date_links: Array<{ date: string; label: string }>
   extensions: string[]
+}
+
+export interface AdminBootstrap {
+  view: AdminView
+  version: string
+  title: string
+}
+
+export type AdminView = 'manager' | 'chart' | 'history' | 'urllist' | 'filer'
+
+export interface AdminConfig {
+  title: string
+  domain: string
+  imgurl: string
+  maxSize: number
+  extensions: string
+  mustLogin: number
+  compress_ratio: number
+  thumbnail: number
+  thumbnail_w: number
+  thumbnail_h: number
+  webp_convert: number
+  webp_quality: number
+  watermark: number
+  waterText: string
+  waterPosition: number
+  textColor: string
+  textSize: number
+  textFont: string
+  waterImg: string
+  captcha: number
+  captcha_type: number
+  turnstile_site_key: string
+  recaptcha_site_key: string
+  hotlink_protect: number
+  hotlink_domains: string
+  mime: string
+  storage_path: string
+  time_format: string
+  auto_delete: number
+  turnstile_secret_set: boolean
+  recaptcha_secret_set: boolean
+}
+
+export interface AdminOverview {
+  version: string
+  total_files: number
+  used_space: number
+  used_human: string
+  config: AdminConfig
+}
+
+export interface AdminChart {
+  version: string
+  total_files: number
+  used_space: number
+  used_human: string
+  daily_stats: Array<{ date: string; count: number }>
+  format_stats: Record<string, number>
+}
+
+export interface AdminFileEntry {
+  name: string
+  path: string
+  url: string
+  thumb_url: string
+  webp_url?: string
+}
+
+export interface AdminURLList {
+  path: string
+  page: number
+  page_size: number
+  total: number
+  total_pages: number
+  files: AdminFileEntry[]
+}
+
+export interface AdminFiler {
+  path: string
+  parent_path: string
+  dirs: string[]
+  files: AdminFileEntry[]
 }

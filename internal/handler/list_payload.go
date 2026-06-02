@@ -12,11 +12,13 @@ import (
 )
 
 type imageListFile struct {
-	Name    string `json:"name"`
-	URL     string `json:"url"`
-	WebPURL string `json:"webp_url,omitempty"`
-	InfoURL string `json:"info_url"`
-	DownURL string `json:"down_url"`
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	URL      string `json:"url"`
+	ThumbURL string `json:"thumb_url"`
+	WebPURL  string `json:"webp_url,omitempty"`
+	InfoURL  string `json:"info_url"`
+	DownURL  string `json:"down_url"`
 }
 
 type imageListPayloadData struct {
@@ -82,11 +84,13 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 		}
 		relativePath := cfg.Path + datePath + name
 		files = append(files, imageListFile{
-			Name:    name,
-			URL:     cfg.Domain + relativePath,
-			WebPURL: service.GetWebPURL(relativePath, cfg),
-			InfoURL: "/app/info?img=" + relativePath,
-			DownURL: "/app/down?dw=" + relativePath,
+			Name:     name,
+			Path:     relativePath,
+			URL:      cfg.Domain + relativePath,
+			ThumbURL: "/app/thumb?img=" + relativePath,
+			WebPURL:  service.GetWebPURL(relativePath, cfg),
+			InfoURL:  "/app/info?img=" + relativePath,
+			DownURL:  "/app/down?dw=" + relativePath,
 		})
 	}
 

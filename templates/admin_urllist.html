@@ -6,114 +6,12 @@
     <title>图片列表 - {{.config.Title}}</title>
     <link rel="stylesheet" href="/public/static/zui/css/zui.min.css">
     <link rel="stylesheet" href="/public/static/EasyImage.css">
-    <style>
-        .url-table { font-size: 13px; }
-        .url-table td { vertical-align: middle; }
-        .url-cell { word-break: break-all; max-width: 400px; }
-        .url-cell a { color: #3280fc; text-decoration: none; }
-        .url-cell a:hover { text-decoration: underline; }
-        .preview-thumb { width: 60px; height: 60px; object-fit: cover; border-radius: 4px; cursor: pointer; }
-        .copy-btn { cursor: pointer; padding: 2px 6px; }
-        .pagination-wrap { margin-top: 20px; text-align: center; }
-        .page-info { margin: 10px 0; color: #666; }
-    </style>
+    {{vite "web/src/entries/admin.ts"}}
 </head>
 <body>
-    <nav class="navbar navbar-default">
-        <div class="container">
-            <div class="navbar-header">
-                <a class="navbar-brand" href="/admin/manager">EasyImage 管理后台</a>
-            </div>
-            <ul class="nav navbar-nav navbar-right">
-                <li><a href="/">首页</a></li>
-                <li><a href="/admin/history">历史上传</a></li>
-                <li><a href="/admin/urllist">图片列表</a></li>
-                <li><a href="/admin/chart">统计</a></li>
-                <li><a href="/admin/filer">文件管理</a></li>
-            </ul>
-        </div>
-    </nav>
-
-    <div class="container">
-        <div class="panel panel-default">
-            <div class="panel-heading">
-                <h3 class="panel-title">
-                    <i class="icon icon-list"></i> 图片URL列表
-                    <span class="badge">{{.total}} 张</span>
-                </h3>
-            </div>
-            <div class="panel-body">
-                <div class="page-info">
-                    共 {{.total}} 张图片，第 {{.page}}/{{.totalPages}} 页
-                </div>
-
-                <table class="table table-hover table-bordered url-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 80px;">预览</th>
-                            <th>文件名</th>
-                            <th>图片URL</th>
-                            <th style="width: 120px;">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{range .files}}
-                        <tr>
-                            <td>
-                                <img src="{{.URL}}" class="preview-thumb" onerror="this.src='/public/images/error.png'" loading="lazy">
-                            </td>
-                            <td>{{.Name}}</td>
-                            <td class="url-cell">
-                                <a href="{{.URL}}" target="_blank">{{.URL}}</a>
-                                {{if .WebPURL}}
-                                <br><small class="text-muted">WebP: </small><a href="{{.WebPURL}}" target="_blank">{{.WebPURL}}</a>
-                                {{end}}
-                            </td>
-                            <td>
-                                <button class="btn btn-xs btn-primary copy-btn" data-clipboard-text="{{.URL}}" title="复制URL">
-                                    <i class="icon icon-copy"></i> 复制
-                                </button>
-                                {{if .WebPURL}}
-                                <button class="btn btn-xs btn-info copy-btn" data-clipboard-text="{{.WebPURL}}" title="复制WebP URL">
-                                    <i class="icon icon-copy"></i> WebP
-                                </button>
-                                {{end}}
-                            </td>
-                        </tr>
-                        {{end}}
-                    </tbody>
-                </table>
-
-                <!-- 分页 -->
-                <div class="pagination-wrap">
-                    <ul class="pager">
-                        {{if gt .page 1}}
-                        <li><a href="?path={{.path}}&page={{minus .page 1}}&page_size={{.pageSize}}">上一页</a></li>
-                        {{else}}
-                        <li class="disabled"><a href="#">上一页</a></li>
-                        {{end}}
-
-                        <li><span>第 {{.page}} / {{.totalPages}} 页</span></li>
-
-                        {{if lt .page .totalPages}}
-                        <li><a href="?path={{.path}}&page={{minus .page -1}}&page_size={{.pageSize}}">下一页</a></li>
-                        {{else}}
-                        <li class="disabled"><a href="#">下一页</a></li>
-                        {{end}}
-                    </ul>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="/public/static/zui/lib/jquery/jquery-3.6.4.min.js"></script>
-    <script src="/public/static/zui/js/zui.min.js"></script>
-    <script src="/public/static/zui/lib/clipboard/clipboard.min.js"></script>
+    <div id="admin-app"></div>
     <script>
-        // 复制链接
-        new Clipboard('.copy-btn').on('success', function(e) {
-            new $.zui.Messager('复制成功', { type: 'success', icon: 'ok-sign' }).show();
-        });
+        window.EasyImageAdmin = {{json_script .admin}};
     </script>
 </body>
 </html>
