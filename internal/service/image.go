@@ -575,7 +575,13 @@ func GenerateImageHash(path string) string {
 // StartImagePostProcess queues post-processing behind a fixed worker pool.
 // This preserves fast upload responses while bounding CPU-heavy image work.
 func StartImagePostProcess(filePath string, cfg *config.Config) {
-	imageProcessQueue <- imageProcessJob{filePath: filePath, cfg: cfg}
+	job := imageProcessJob{filePath: filePath, cfg: cfg}
+	select {
+	case imageProcessQueue <- job:
+	default:
+		log.Printf("[PostProcess] queue full, processing asynchronously: %s", filePath)
+		go ProcessImageAfterUpload(job.filePath, job.cfg)
+	}
 }
 
 // ProcessImageAfterUpload 上传后处理图片。

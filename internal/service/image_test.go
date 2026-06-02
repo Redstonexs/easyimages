@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -48,6 +49,26 @@ func TestConvertToWebPAcceptsAbsoluteUploadPath(t *testing.T) {
 	webpPath := filepath.Join(tmp, "i", "webp", "2026", "05", "12", "photo.webp")
 	if _, err := os.Stat(webpPath); err != nil {
 		t.Fatalf("expected webp file at %s: %v", webpPath, err)
+	}
+}
+
+func TestStartImagePostProcessDoesNotBlockWhenQueueIsFull(t *testing.T) {
+	originalQueue := imageProcessQueue
+	imageProcessQueue = make(chan imageProcessJob)
+	t.Cleanup(func() {
+		imageProcessQueue = originalQueue
+	})
+
+	done := make(chan struct{})
+	go func() {
+		StartImagePostProcess(filepath.Join(t.TempDir(), "photo.jpg"), &config.Config{})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("StartImagePostProcess blocked when the queue was unavailable")
 	}
 }
 

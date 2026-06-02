@@ -35,7 +35,7 @@
     ]
   },
   "web/src/entries/upload.ts": {
-    "file": "assets/upload-CL4I-CYq.js",
+    "file": "assets/upload-C3R2RPa2.js",
     "name": "upload",
     "src": "web/src/entries/upload.ts",
     "isEntry": true,
@@ -43,7 +43,7 @@
       "_app-CQ0jCQTk.js"
     ],
     "css": [
-      "assets/upload-C2oUZz4Z.css"
+      "assets/upload-ClSJl1bm.css"
     ]
   }
 }
