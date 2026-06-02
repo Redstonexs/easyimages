@@ -43,12 +43,12 @@
         border-radius: 5px 5px 5px 5px;
     }
 
-    img {
+    .listNum img {
         cursor: pointer;
         transition: all 0.8s;
     }
 
-    img:hover {
+    .listNum img:hover {
         transform: scale(1.5);
         position: relative;
         z-index: 100;

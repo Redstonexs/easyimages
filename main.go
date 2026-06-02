@@ -84,6 +84,8 @@ func main() {
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+	r.Use(frontendCacheHeaders())
+	vite := loadViteAssets("public/dist/.vite/manifest.json")
 
 	// 设置 multipart 表单的内存阈值。高并发上传时，过大的内存缓冲会快速放大
 	// RSS 和 GC 压力；超过阈值的部分由 net/http 使用临时文件承接。
@@ -91,6 +93,8 @@ func main() {
 
 	// 注册自定义模板函数
 	r.SetFuncMap(template.FuncMap{
+		"vite":        vite.Tags,
+		"json_script": jsonForTemplate,
 		"format_size": service.FormatSize,
 		"mul": func(a, b interface{}) int {
 			var ai, bi int
@@ -212,6 +216,7 @@ func main() {
 
 	// API路由
 	r.POST("/api/index", handler.APIUpload(cfg))
+	r.GET("/api/list", handler.ImageListAPI(cfg))
 	r.GET("/api/urllist", handler.ImageURLListAPI(cfg))
 	r.OPTIONS("/api/index", func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")

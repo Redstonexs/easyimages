@@ -1,6 +1,7 @@
 # Git
 .git
 .gitignore
+.github
 
 # IDE
 .idea
@@ -18,9 +19,23 @@ docs
 !README.md
 
 # Build artifacts
+easyimage
+node_modules
+public/dist
 *.exe
 *.test
 *.out
+
+# Runtime state
+admin/logs
+i/*
+!i/.gitkeep
+config/config.json
+config/config.guest.json
+config/api_key.json
+config/install.lock
+config/EasyImage.lock
+config/php_backup
 
 # Temporary files
 *.tmp
@@ -30,6 +45,3 @@ docs
 Dockerfile
 docker-compose.yml
 .dockerignore
-
-# PHP backup (not needed in image)
-config/php_backup

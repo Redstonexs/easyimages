@@ -1,0 +1,37 @@
+{
+  "_app-CIZ5qtxn.js": {
+    "file": "assets/app-CIZ5qtxn.js",
+    "name": "app",
+    "css": [
+      "assets/app-mMNm0_5Q.css"
+    ]
+  },
+  "_app-mMNm0_5Q.css": {
+    "file": "assets/app-mMNm0_5Q.css",
+    "src": "_app-mMNm0_5Q.css"
+  },
+  "web/src/entries/gallery.ts": {
+    "file": "assets/gallery-D3k5_rre.js",
+    "name": "gallery",
+    "src": "web/src/entries/gallery.ts",
+    "isEntry": true,
+    "imports": [
+      "_app-CIZ5qtxn.js"
+    ],
+    "css": [
+      "assets/gallery-B2vcrbVm.css"
+    ]
+  },
+  "web/src/entries/upload.ts": {
+    "file": "assets/upload-F7as5lAZ.js",
+    "name": "upload",
+    "src": "web/src/entries/upload.ts",
+    "isEntry": true,
+    "imports": [
+      "_app-CIZ5qtxn.js"
+    ],
+    "css": [
+      "assets/upload-C2oUZz4Z.css"
+    ]
+  }
+}
