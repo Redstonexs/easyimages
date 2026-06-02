@@ -1,0 +1,21 @@
+{
+  "title": "简单图床 - EasyImage",
+  "domain": "http://127.0.0.1:8080",
+  "imgurl": "http://127.0.0.1:8080",
+  "user": "admin",
+  "password": "7676aaafb027c825bd9abab78b234070e702752f625b752e55e55b48e607e358",
+  "path": "/i/",
+  "storage_path": "Y/m/d/",
+  "mime": "image/*,video/*",
+  "maxSize": 10485760,
+  "maxUploadFiles": 30,
+  "extensions": "jpg,jpeg,png,gif,bmp,webp,ico,jfif,tif,tga,svg",
+  "thumbnail": 1,
+  "thumbnail_w": 258,
+  "thumbnail_h": 258,
+  "webp_convert": 0,
+  "webp_quality": 80,
+  "theme": "default",
+  "timezone": "Asia/Shanghai",
+  "port": 8080
+}

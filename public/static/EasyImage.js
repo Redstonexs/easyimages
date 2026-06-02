@@ -108,7 +108,7 @@ function uploadCopy(copyID, loadClass) {
             $("#upShowID").removeClass("load-indicator loading"); // 移除正在上传状态 2-5
             $.zui.messager.show('因网络问题导致的上传失败...', { icon: 'bell', time: 4000, type: 'primary', placement: 'top' });
         };
-        xhr.open('POST', 'app/upload.php', true);
+        xhr.open('POST', '/app/upload', true);
         xhr.send(formData);
     });
 })();

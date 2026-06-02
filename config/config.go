@@ -11,6 +11,11 @@ import (
 // Version is the application version, overridden at build time via ldflags.
 var Version = "4.0.1"
 
+const (
+	defaultDomain       = "http://127.0.0.1:8080"
+	defaultPasswordHash = "7676aaafb027c825bd9abab78b234070e702752f625b752e55e55b48e607e358"
+)
+
 type Config struct {
 	Title               string   `json:"title"`
 	Keywords            string   `json:"keywords"`
@@ -194,6 +199,35 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// HasInstalledOrCustomizedGoConfig checks config/config.json without mutating
+// the in-memory config singleton. It is used before PHP auto-migration.
+func HasInstalledOrCustomizedGoConfig() bool {
+	data, err := os.ReadFile("config/config.json")
+	if err != nil {
+		return false
+	}
+
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return false
+	}
+	if cfg.Domain == "" {
+		cfg.Domain = defaultDomain
+	}
+	if cfg.Password == "" {
+		cfg.Password = defaultPasswordHash
+	}
+
+	if cfg.Domain != defaultDomain || cfg.Password != defaultPasswordHash {
+		return true
+	}
+	if _, err := os.Stat("config/install.lock"); err == nil {
+		return true
+	}
+
+	return false
+}
+
 func Save(cfg *Config) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -349,10 +383,10 @@ func getDefaultConfig() *Config {
 		Title:           "简单图床 - EasyImage",
 		Keywords:        "简单图床,easyimage,无数据库图床",
 		Description:     "简单图床EasyImage是一款支持多文件上传的无数据库图床",
-		Domain:          "http://127.0.0.1:8080",
-		ImageURL:        "http://127.0.0.1:8080",
+		Domain:          defaultDomain,
+		ImageURL:        defaultDomain,
 		User:            "admin",
-		Password:        "7676aaafb027c825bd9abab78b234070e702752f625b752e55e55b48e607e358",
+		Password:        defaultPasswordHash,
 		Path:            "/i/",
 		StoragePath:     "Y/m/d/",
 		Mime:            "image/*,video/*",
@@ -369,7 +403,7 @@ func getDefaultConfig() *Config {
 		MinWidth:        5,
 		MinHeight:       5,
 		Theme:           "default",
-		StaticCDNURL:    "https://fastly.jsdelivr.net/gh/icret/EasyImages2.0",
+		StaticCDNURL:    "https://fastly.jsdelivr.net/gh/Redstonexs/easyimages",
 		ShowSwitch:      1,
 		History:         1,
 		ShowSort:        1,

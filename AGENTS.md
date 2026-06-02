@@ -24,7 +24,7 @@ EasyImage is a Go rewrite of a PHP image host (图床): one Gin binary, Go HTML 
 - `main.go` is the wiring file: auto-migration, config load, directory creation, Gin routes, template funcs, static file routes, and server timeouts.
 - `config/config.go` owns the config singleton. Use `config.Load()` at startup, `config.Get()` only after load, and `config.Save(cfg)` for writes. Handlers receive `*config.Config` closures; do not introduce new global config reads in handlers.
 - `internal/handler/handler.go` contains nearly all HTTP handlers. `internal/service/` owns auth, file operations, image processing, captcha, and legacy password compatibility.
-- Real upload API route is `POST /api/index`; `README_GO.md` still shows legacy `/api/index.php` in one example.
+- Real upload API route is `POST /api/index`; do not document legacy PHP-style `/api/index.php` unless a compatibility route is added.
 - Image URLs use `cfg.Path` such as `/i/`; filesystem access needs the local prefix (`"." + cfg.Path`). Be careful with `filepath.Join(".", cfg.Path, ...)` because a leading slash in `cfg.Path` can discard the dot on Unix.
 - Static image serving registers `strings.TrimRight(cfg.Path, "/")` and wraps it with `middleware.HotlinkProtection(cfg)`.
 

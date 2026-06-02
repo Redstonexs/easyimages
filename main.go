@@ -249,11 +249,11 @@ func main() {
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           r,
-		ReadHeaderTimeout: 30 * time.Second,    // 读取请求头超时
-		ReadTimeout:       5 * time.Minute,     // 读取整个请求体超时（含大文件上传）
-		WriteTimeout:      5 * time.Minute,     // 写入响应超时
-		IdleTimeout:       120 * time.Second,   // 空闲连接超时
-		MaxHeaderBytes:    1 << 20,             // 1MB 最大请求头
+		ReadHeaderTimeout: 30 * time.Second,  // 读取请求头超时
+		ReadTimeout:       5 * time.Minute,   // 读取整个请求体超时（含大文件上传）
+		WriteTimeout:      5 * time.Minute,   // 写入响应超时
+		IdleTimeout:       120 * time.Second, // 空闲连接超时
+		MaxHeaderBytes:    1 << 20,           // 1MB 最大请求头
 	}
 	log.Printf("EasyImage starting on %s", addr)
 	if err := server.ListenAndServe(); err != nil {
@@ -264,14 +264,15 @@ func main() {
 // checkAndMigrate 检测并执行自动迁移
 func checkAndMigrate() error {
 	// 检查是否已有Go配置（非默认配置）
-	if hasValidGoConfig() {
+	if config.HasInstalledOrCustomizedGoConfig() {
 		log.Println("Valid Go config exists, skipping migration")
 		return nil
 	}
 
-	// 检查是否存在PHP配置
-	if !config.HasPHPConfig() {
-		log.Println("No PHP config found, skipping migration")
+	// 检查是否存在可迁移的PHP配置。仓库内置的默认PHP配置只作为示例，
+	// 不能触发自动迁移，否则全新安装会被安装锁跳过。
+	if !config.HasMigratablePHPConfig() {
+		log.Println("No migratable PHP config found, skipping migration")
 		return nil
 	}
 
@@ -300,34 +301,4 @@ func checkAndMigrate() error {
 	log.Println("========================================")
 
 	return nil
-}
-
-// hasValidGoConfig 检查是否存在有效的Go配置（非默认配置）
-func hasValidGoConfig() bool {
-	// 检查配置文件是否存在
-	if _, err := os.Stat("config/config.json"); os.IsNotExist(err) {
-		return false
-	}
-
-	// 加载配置并检查是否已自定义
-	cfg, err := config.Load()
-	if err != nil {
-		return false
-	}
-
-	// 检查是否还是默认配置（域名和密码未修改）
-	defaultDomain := "http://127.0.0.1:8080"
-	defaultPassword := "7676aaafb027c825bd9abab78b234070e702752f625b752e55e55b48e607e358"
-
-	// 如果域名或密码已修改，说明是有效配置
-	if cfg.Domain != defaultDomain || cfg.Password != defaultPassword {
-		return true
-	}
-
-	// 如果有安装锁文件，说明已完成安装
-	if _, err := os.Stat("config/install.lock"); err == nil {
-		return true
-	}
-
-	return false
 }

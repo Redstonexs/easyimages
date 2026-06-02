@@ -1,94 +1,106 @@
-### 上传成功后返回JSON示例
-```json
-    {
-        "result":"success",
-        "code":200,
-        "url":"https:\/\/i2.100024.xyz\/2023\/01\/24\/10gwv0y-0.webp",
-        "srcName":"195124",
-        "thumb":"https:\/\/png.cm\/application\/thumb.php?img=\/i\/2023\/01\/24\/10gwv0y-0.webp",
-        "del":"https:\/\/png.cm\/application\/del.php?hash=bW8vWG4vcG8yM2pLQzRJUGI0dHlTZkN4L2grVmtwUTFhd1A4czJsbHlMST0="
-    }
-```
-- 返回示例解释
-  `result` 返回状态
-  `code` 返回状态编号 参考[常见状态代码](./常见状态代码.md)
-  `url` 文件链接
-  `srcName` 原始名称
-  `thumb` 缩略图
-  `del` 文件删除链接
+# API
 
-### 上传示例 仅供参考
+Go 版本上传接口为 `POST /api/index`。旧 PHP 风格的 `/api/index.php` 当前没有兼容路由。
 
-- html
+## 前置条件
+
+- 在管理后台开启 API 上传。
+- 使用 `config/api_key.json` 中的有效 token，或从旧 PHP `config/api_key.php` 自动迁移生成。
+
+## 上传参数
+
+| 参数 | 位置 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `image` | multipart file | 是 | 要上传的文件 |
+| `token` | multipart form | 是 | API token |
+
+## HTML 示例
 
 ```html
-<form action="http://127.0.0.1/api/index.php" method="post" enctype="multipart/form-data">
-    <input type="file" name="image" accept="image/*" required>
-    <input type="text" name="token" placeholder="在tokenList文件找到token并输入" required> 
-    <input type="submit" value="上传">
+<form action="http://127.0.0.1:8080/api/index" method="post" enctype="multipart/form-data">
+  <input type="file" name="image" accept="image/*" required>
+  <input type="text" name="token" placeholder="输入 API token" required>
+  <input type="submit" value="上传">
 </form>
-
 ```
-- Python
 
-```Python
+## curl 示例
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/index \
+  -F "image=@/path/to/your/file/example.jpg" \
+  -F "token=your_token"
+```
+
+## Python 示例
+
+```python
 import requests
 
-# 本地图片文件路径
 image_path = "/path/to/your/image.jpg"
+token = "your_token"
+url = "http://127.0.0.1:8080/api/index"
 
-# token值，需从实际来源获取（例如读取tokenList文件）
-token = "your_token_value_here"
+with open(image_path, "rb") as image:
+    response = requests.post(
+        url,
+        files={"image": image},
+        data={"token": token},
+        timeout=30,
+    )
 
-# 目标URL
-url = "http://127.0.0.1/api/index.php"
-
-# 构建请求参数
-files = {'image': open(image_path, 'rb')}
-data = {'token': token}
-
-# 发送POST请求
-response = requests.post(url, files=files, data=data)
-
-# 检查响应状态码
-if response.status_code == 200:
-    print("Upload successful.")
-else:
-    print(f"Upload failed with status code {response.status_code}.")
-```
-- Curl
-
-```CURL
-curl -X POST http://127.0.0.1/api/index.php \
--F "image=@/path/to/your/file/example.jpg" \
--F "token=your_token"
+print(response.status_code)
+print(response.json())
 ```
 
-- JQuery
+## jQuery 示例
 
-```JAVASCRIPT
-// 获取文件和token
+```javascript
 var file = document.querySelector('input[type="file"]').files[0];
 var token = $('input[name="token"]').val();
 
-// 创建FormData对象
 var formData = new FormData();
 formData.append('image', file);
 formData.append('token', token);
 
-// 发起上传请求
 $.ajax({
-    url: 'http://127.0.0.1/api/index.php',
-    type: 'POST',
-    data: formData,
-    processData: false,
-    contentType: false,
-    success: function(response) {
-        console.log('文件上传成功');
-    },
-    error: function(xhr, status, error) {
-        console.error('文件上传失败: ' + error);
-    }
+  url: 'http://127.0.0.1:8080/api/index',
+  type: 'POST',
+  data: formData,
+  processData: false,
+  contentType: false,
+  success: function(response) {
+    console.log('上传成功', response);
+  },
+  error: function(xhr, status, error) {
+    console.error('上传失败: ' + error);
+  }
 });
-
 ```
+
+## 成功响应
+
+```json
+{
+  "result": "success",
+  "code": 200,
+  "url": "http://127.0.0.1:8080/i/2026/06/02/example.jpg",
+  "srcName": "example",
+  "thumb": "http://127.0.0.1:8080/app/thumb?img=/i/2026/06/02/example.jpg",
+  "del": "http://127.0.0.1:8080/app/del_hash?hash=...",
+  "id": 0
+}
+```
+
+## 响应字段
+
+| 字段 | 说明 |
+| --- | --- |
+| `result` | `success` 或 `failed` |
+| `code` | 状态码，见 [常见状态代码](./常见状态代码.md) |
+| `url` | 原图访问地址 |
+| `srcName` | 原始文件名去扩展名后的名称 |
+| `thumb` | 缩略图地址 |
+| `del` | 用户删除链接，取决于配置 |
+| `webp_url` | WebP 转换启用且生成成功时返回 |
+| `id` | API token 对应的 ID |

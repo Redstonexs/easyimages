@@ -33,6 +33,12 @@ func main() {
 		fmt.Println("\n未检测到PHP配置文件，无需迁移")
 		return
 	}
+	migratable := config.HasMigratablePHPConfig()
+	if migratable {
+		fmt.Println("   ✓ 检测到可迁移的PHP配置")
+	} else {
+		fmt.Println("   ⚠ 仅检测到仓库默认PHP配置模板，不会自动迁移")
+	}
 
 	// 检测Go配置
 	fmt.Println("\n2. 检测Go配置文件...")
@@ -77,6 +83,10 @@ func main() {
 		fmt.Println("\n5. 迁移状态:")
 		fmt.Println("   ✓ Go配置已存在，无需迁移")
 		fmt.Println("   如需重新迁移，请先删除 config/*.json 文件")
+	} else if !migratable {
+		fmt.Println("\n5. 迁移状态:")
+		fmt.Println("   ✓ 当前PHP配置是仓库默认模板，无需迁移")
+		fmt.Println("   全新安装请运行 ./easyimage 并访问 /install/")
 	} else {
 		fmt.Println("\n5. 迁移状态:")
 		fmt.Println("   ⚠ Go配置不存在，需要迁移")
@@ -113,38 +123,38 @@ func convertPHPToGoConfigPreview(phpConfig map[string]interface{}) map[string]in
 
 	// 映射关键配置
 	configMap := map[string]string{
-		"title":           "title",
-		"domain":          "domain",
-		"imgurl":          "imgurl",
-		"user":            "user",
-		"password":        "password",
-		"path":            "path",
-		"storage_path":    "storage_path",
-		"maxSize":         "maxSize",
-		"maxUploadFiles":  "maxUploadFiles",
-		"extensions":      "extensions",
-		"compress":        "compress",
-		"compress_ratio":  "compress_ratio",
-		"thumbnail":       "thumbnail",
-		"thumbnail_w":     "thumbnail_w",
-		"thumbnail_h":     "thumbnail_h",
-		"watermark":       "watermark",
-		"mustLogin":       "mustLogin",
-		"apiStatus":       "apiStatus",
-		"check_ip":        "check_ip",
-		"upload_logs":     "upload_logs",
-		"hide":            "hide",
-		"hide_path":       "hide_path",
-		"admin_path_status": "admin_path_status",
-		"guest_path_status": "guest_path_status",
-		"image_recycl":    "image_recycl",
+		"title":              "title",
+		"domain":             "domain",
+		"imgurl":             "imgurl",
+		"user":               "user",
+		"password":           "password",
+		"path":               "path",
+		"storage_path":       "storage_path",
+		"maxSize":            "maxSize",
+		"maxUploadFiles":     "maxUploadFiles",
+		"extensions":         "extensions",
+		"compress":           "compress",
+		"compress_ratio":     "compress_ratio",
+		"thumbnail":          "thumbnail",
+		"thumbnail_w":        "thumbnail_w",
+		"thumbnail_h":        "thumbnail_h",
+		"watermark":          "watermark",
+		"mustLogin":          "mustLogin",
+		"apiStatus":          "apiStatus",
+		"check_ip":           "check_ip",
+		"upload_logs":        "upload_logs",
+		"hide":               "hide",
+		"hide_path":          "hide_path",
+		"admin_path_status":  "admin_path_status",
+		"guest_path_status":  "guest_path_status",
+		"image_recycl":       "image_recycl",
 		"show_user_hash_del": "show_user_hash_del",
-		"showSwitch":      "showSwitch",
-		"history":         "history",
-		"showSort":        "showSort",
-		"listNumber":      "listNumber",
-		"listDate":        "listDate",
-		"timezone":        "timezone",
+		"showSwitch":         "showSwitch",
+		"history":            "history",
+		"showSort":           "showSort",
+		"listNumber":         "listNumber",
+		"listDate":           "listDate",
+		"timezone":           "timezone",
 	}
 
 	for phpKey, goKey := range configMap {

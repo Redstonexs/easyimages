@@ -34,7 +34,7 @@ config/php_backup/
 admin/logs/
 
 # Image storage
-i/
+i/*
 !i/.gitkeep
 
 # Temp

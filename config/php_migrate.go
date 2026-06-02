@@ -99,22 +99,20 @@ func (p *PHPConfigParser) Parse() (map[string]interface{}, error) {
 
 // AutoMigrate 自动迁移PHP配置到Go配置
 func AutoMigrate() error {
-	// 检查是否已有Go配置
-	if _, err := os.Stat("config/config.json"); err == nil {
-		// 已有Go配置，跳过迁移
+	// 检查是否已有已安装或自定义的Go配置
+	if HasInstalledOrCustomizedGoConfig() {
 		return nil
 	}
 
-	// 检查是否存在PHP配置
-	phpConfigFile := "config/config.php"
-	if _, err := os.Stat(phpConfigFile); os.IsNotExist(err) {
-		// 无PHP配置，跳过迁移
+	// 检查是否存在可迁移的PHP配置
+	if !HasMigratablePHPConfig() {
 		return nil
 	}
 
 	fmt.Println("检测到PHP版本配置，开始自动迁移...")
 
 	// 解析PHP配置
+	phpConfigFile := "config/config.php"
 	parser := NewPHPConfigParser(phpConfigFile)
 	phpConfig, err := parser.Parse()
 	if err != nil {
@@ -520,22 +518,101 @@ func parseInt(s string) (int, error) {
 	return n, err
 }
 
-// HasPHPConfig 检测是否存在PHP配置
-func HasPHPConfig() bool {
-	phpFiles := []string{
-		"config/config.php",
-		"config/config.guest.php",
-		"config/api_key.php",
+// HasMigratablePHPConfig reports whether config/config.php looks like a real
+// user PHP configuration rather than the bundled default sample.
+func HasMigratablePHPConfig() bool {
+	phpConfigFile := "config/config.php"
+	if _, err := os.Stat(phpConfigFile); err != nil {
+		return false
 	}
 
-	for _, file := range phpFiles {
-		if _, err := os.Stat(file); err == nil {
-			return true
-		}
+	parser := NewPHPConfigParser(phpConfigFile)
+	phpConfig, err := parser.Parse()
+	if err != nil {
+		return true
+	}
+
+	if !isBundledDefaultPHPConfig(phpConfig) {
+		return true
+	}
+	if hasNonBundledPHPFile("config/config.guest.php", bundledDefaultGuestConfigPHP) {
+		return true
+	}
+	if hasNonBundledPHPFile("config/api_key.php", bundledDefaultAPIKeyPHP) {
+		return true
 	}
 
 	return false
 }
+
+func hasNonBundledPHPFile(path string, bundledDefault string) bool {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+
+	return normalizePHPConfig(string(data)) != normalizePHPConfig(bundledDefault)
+}
+
+func normalizePHPConfig(data string) string {
+	data = strings.ReplaceAll(data, "\r\n", "\n")
+	return strings.TrimSpace(data)
+}
+
+func isBundledDefaultPHPConfig(phpConfig map[string]interface{}) bool {
+	bundledDefaults := map[string]string{
+		"title":        "简单图床 - EasyImage",
+		"domain":       "http://127.0.0.1",
+		"imgurl":       "http://127.0.0.1",
+		"user":         "admin",
+		"password":     defaultPasswordHash,
+		"path":         "/i/",
+		"storage_path": "Y/m/d/",
+		"update":       "2025-07-04 19:28:57",
+	}
+
+	for key, want := range bundledDefaults {
+		got, ok := phpConfig[key].(string)
+		if !ok || got != want {
+			return false
+		}
+	}
+
+	return true
+}
+
+const bundledDefaultGuestConfigPHP = `<?php
+$guestConfig=Array
+	(
+	'guest'=>Array
+		(
+		'password'=>'84983c60f7daadc1cb8698621f802c0d9f9a3c3c295c810748fb048115c186ec',
+		'expired'=>1765301956,
+		'add_time'=>1678988356
+		)
+	);
+`
+
+const bundledDefaultAPIKeyPHP = `<?php
+$tokenList=Array
+	(
+	'1c17b11693cb5ec63859b091c5b9c1b2'=>Array
+		(
+		'id'=>0,
+		'expired'=>2544411528,
+		'add_time'=>1680497928
+		),
+	'833c5611862efcaa9955205ee96125e9'=>Array
+		(
+		'id'=>2,
+		'expired'=>1680584583,
+		'add_time'=>1680498183
+		)
+	);
+`
 
 // MigratePHPData 迁移PHP数据目录
 func MigratePHPData() error {
