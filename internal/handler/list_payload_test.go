@@ -63,6 +63,12 @@ func TestImageListPayloadBuildsFrontendGalleryData(t *testing.T) {
 	if file.URL != "https://img.example.com/i/2026/06/02/first.jpg" {
 		t.Fatalf("URL = %q", file.URL)
 	}
+	if file.Path != "/i/2026/06/02/first.jpg" {
+		t.Fatalf("Path = %q", file.Path)
+	}
+	if file.ThumbURL != "/app/thumb?img=/i/2026/06/02/first.jpg" {
+		t.Fatalf("ThumbURL = %q", file.ThumbURL)
+	}
 	if file.InfoURL != "/app/info?img=/i/2026/06/02/first.jpg" {
 		t.Fatalf("InfoURL = %q", file.InfoURL)
 	}

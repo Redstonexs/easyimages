@@ -3,6 +3,7 @@
 interface Window {
   EasyImageUpload?: import('./types').UploadBootstrap
   EasyImageGallery?: import('./types').GalleryBootstrap
+  EasyImageAdmin?: import('./types').AdminBootstrap
   turnstile?: {
     render: (selector: string, options: { sitekey: string; callback: (token: string) => void }) => unknown
     reset: (selector: string) => void

@@ -15,6 +15,7 @@ const gallery = ref<GalleryBootstrap>({ ...props.bootstrap })
 const loading = ref(false)
 const selectedImage = ref<GalleryFile | null>(null)
 const notices = ref<Notice[]>([])
+const failedThumbs = ref<Set<string>>(new Set())
 
 const activeDate = computed(() => gallery.value.date)
 const activeSearch = computed(() => gallery.value.search)
@@ -72,6 +73,10 @@ function openImage(file: GalleryFile) {
 function closeImage() {
   selectedImage.value = null
 }
+
+function markThumbFailed(url: string) {
+  failedThumbs.value = new Set([...failedThumbs.value, url])
+}
 </script>
 
 <template>
@@ -118,7 +123,21 @@ function closeImage() {
     <section v-if="gallery.files.length" class="gallery-grid" aria-live="polite">
       <article v-for="file in gallery.files" :key="file.url" class="gallery-card">
         <button type="button" class="image-button" @click="openImage(file)">
-          <img :src="file.webp_url || file.url" :alt="file.name" loading="lazy">
+          <span v-if="failedThumbs.has(file.url)" class="thumb-fallback">
+            <i class="icon icon-picture" aria-hidden="true"></i>
+            <span>{{ file.name }}</span>
+          </span>
+          <img
+            v-else
+            :src="file.thumb_url"
+            :alt="file.name"
+            width="320"
+            height="240"
+            loading="lazy"
+            decoding="async"
+            fetchpriority="low"
+            @error="markThumbFailed(file.url)"
+          >
         </button>
         <div class="gallery-card-actions">
           <a :href="file.url" target="_blank" rel="noopener" title="打开"><i class="icon icon-picture"></i></a>
@@ -209,6 +228,22 @@ function closeImage() {
   aspect-ratio: 4 / 3;
   object-fit: cover;
   transition: transform 0.25s ease;
+}
+
+.thumb-fallback {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  place-items: center;
+  gap: 8px;
+  padding: 18px;
+  color: #718096;
+  background: linear-gradient(135deg, #f8fafc, #e8eef6);
+  word-break: break-all;
+}
+
+.thumb-fallback .icon {
+  font-size: 28px;
 }
 
 .gallery-card:hover img {

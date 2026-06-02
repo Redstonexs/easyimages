@@ -32,13 +32,13 @@ export default defineConfig({
             }
           },
           {
-            urlPattern: ({ request, url }) => request.destination === 'image' && url.pathname.startsWith('/i/'),
+            urlPattern: ({ request, url }) => request.destination === 'image' && url.pathname === '/app/thumb',
             handler: 'CacheFirst',
             options: {
-              cacheName: 'easyimage-images',
+              cacheName: 'easyimage-thumbnails',
               expiration: {
                 maxEntries: 300,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
+                maxAgeSeconds: 60 * 60 * 24 * 14,
                 purgeOnQuotaError: true
               },
               cacheableResponse: {
@@ -71,7 +71,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         upload: 'web/src/entries/upload.ts',
-        gallery: 'web/src/entries/gallery.ts'
+        gallery: 'web/src/entries/gallery.ts',
+        admin: 'web/src/entries/admin.ts'
       }
     }
   }

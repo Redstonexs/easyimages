@@ -239,6 +239,18 @@ func main() {
 		admin.GET("/urllist", middleware.RequireAdmin(cfg), handler.ImageURLList(cfg))
 		admin.GET("/filer", middleware.RequireAdmin(cfg), handler.Filer(cfg))
 		admin.POST("/del", middleware.RequireAdmin(cfg), handler.AdminDelete(cfg))
+
+		api := admin.Group("/api", middleware.RequireAdmin(cfg))
+		api.GET("/overview", handler.AdminOverviewAPI(cfg))
+		api.GET("/config", handler.AdminConfigAPI(cfg))
+		api.POST("/config", handler.AdminConfigSaveAPI(cfg))
+		api.POST("/batch-webp", handler.AdminBatchWebPAPI(cfg))
+		api.GET("/chart", handler.AdminChartAPI(cfg))
+		api.GET("/history", handler.AdminHistoryAPI(cfg))
+		api.POST("/history/delete", handler.AdminHistoryDeleteAPI(cfg))
+		api.GET("/urllist", handler.AdminURLListAPI(cfg))
+		api.GET("/filer", handler.AdminFilerAPI(cfg))
+		api.POST("/delete", handler.AdminDeleteAPI(cfg))
 	}
 
 	// 删除操作
