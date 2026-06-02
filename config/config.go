@@ -243,6 +243,13 @@ func Get() *Config {
 }
 
 func LoadGuestConfig() (map[string]*GuestConfig, error) {
+	configMu.RLock()
+	if guestConfig != nil {
+		defer configMu.RUnlock()
+		return guestConfig, nil
+	}
+	configMu.RUnlock()
+
 	configMu.Lock()
 	defer configMu.Unlock()
 
@@ -276,6 +283,13 @@ func SaveGuestConfig(gc map[string]*GuestConfig) error {
 }
 
 func LoadAPIKeys() (map[string]*APIKey, error) {
+	configMu.RLock()
+	if apiKeys != nil {
+		defer configMu.RUnlock()
+		return apiKeys, nil
+	}
+	configMu.RUnlock()
+
 	configMu.Lock()
 	defer configMu.Unlock()
 

@@ -109,6 +109,10 @@ func List(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		num := c.DefaultQuery("num", fmt.Sprintf("%d", cfg.ListNumber))
+		limit, err := strconv.Atoi(num)
+		if err != nil || limit <= 0 || limit > 500 {
+			limit = cfg.ListNumber
+		}
 		search := c.Query("search")
 
 		// 验证 search 参数只包含字母数字（防止 glob 注入）
@@ -122,15 +126,14 @@ func List(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		// 获取文件列表
-		basePath := cfg.Path + datePath
+		basePath := "." + cfg.Path + datePath
 		if search != "" {
 			basePath += "*." + search
 		} else {
 			basePath += "*.*"
 		}
 
-		files := service.GetFileList(basePath, cfg.ShowSort)
-		allUpload := service.GetFileCount(cfg.Path + datePath)
+		files, allUpload := service.GetFileListLimited(basePath, cfg.ShowSort, limit)
 
 		// 生成日期链接数据
 		yesterday := time.Now().AddDate(0, 0, -1).Format("2006/01/02/")
@@ -144,15 +147,15 @@ func List(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		c.HTML(http.StatusOK, "list.html", gin.H{
-			"config":     cfg,
-			"files":      files,
-			"date":       datePath,
-			"num":        num,
-			"allUpload":  allUpload,
-			"search":     search,
-			"listDate":   listDate,
-			"yesterday":  yesterday,
-			"dateLinks":  dateLinks,
+			"config":    cfg,
+			"files":     files,
+			"date":      datePath,
+			"num":       num,
+			"allUpload": allUpload,
+			"search":    search,
+			"listDate":  listDate,
+			"yesterday": yesterday,
+			"dateLinks": dateLinks,
 		})
 	}
 }
@@ -211,9 +214,9 @@ func Upload(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusOK, results[0])
 		} else {
 			c.JSON(http.StatusOK, gin.H{
-				"result":  "success",
-				"code":    200,
-				"files":   results,
+				"result": "success",
+				"code":   200,
+				"files":  results,
 			})
 		}
 	}
@@ -421,7 +424,7 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 			imageURL = cfg.Domain + "/app/hide?key=" + service.EncryptHideKey(relativePath, cfg.HideKey)
 		}
 
-		go service.ProcessImageAfterUpload(finalPath, cfg)
+		service.StartImagePostProcess(finalPath, cfg)
 
 		// 生成WebP URL（与 ProcessUpload 保持一致）
 		webpURL := ""
@@ -847,10 +850,10 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 				c.PostForm("g_recaptcha_response"),
 			)
 			if !ok {
-		captchaData := service.GenerateCaptcha(cfg)
-		log.Printf("[Login page] captcha=%d, captcha_type=%d, captcha_data_type=%s, question=%q",
-			cfg.Captcha, cfg.CaptchaType, captchaData.Type, captchaData.Question)
-		c.HTML(http.StatusOK, "admin_login.html", gin.H{
+				captchaData := service.GenerateCaptcha(cfg)
+				log.Printf("[Login page] captcha=%d, captcha_type=%d, captcha_data_type=%s, question=%q",
+					cfg.Captcha, cfg.CaptchaType, captchaData.Type, captchaData.Question)
+				c.HTML(http.StatusOK, "admin_login.html", gin.H{
 					"config":  cfg,
 					"error":   msg,
 					"captcha": captchaData,
@@ -889,10 +892,10 @@ func Manager(cfg *config.Config) gin.HandlerFunc {
 		stats := service.CollectDirStats(fsPath)
 
 		c.HTML(http.StatusOK, "admin_manager.html", gin.H{
-			"config":      cfg,
-			"totalFiles":  stats.TotalFiles,
-			"usedSpace":   stats.TotalSize,
-			"version":     config.Version,
+			"config":     cfg,
+			"totalFiles": stats.TotalFiles,
+			"usedSpace":  stats.TotalSize,
+			"version":    config.Version,
 		})
 	}
 }
@@ -1166,8 +1169,7 @@ func History(cfg *config.Config) gin.HandlerFunc {
 			basePath += "*.*"
 		}
 
-		files := service.GetFileList(basePath, cfg.ShowSort)
-		allUpload := service.GetFileCount(fsPath + datePath + "*.*")
+		files, allUpload := service.GetFileListLimited(basePath, cfg.ShowSort, cfg.ListNumber)
 
 		// 生成日期链接数据
 		yesterday := time.Now().AddDate(0, 0, -1).Format("2006/01/02/")
@@ -1181,14 +1183,14 @@ func History(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		c.HTML(http.StatusOK, "admin_history.html", gin.H{
-			"config":     cfg,
-			"files":      files,
-			"date":       datePath,
-			"allUpload":  allUpload,
-			"search":     search,
-			"listDate":   listDate,
-			"yesterday":  yesterday,
-			"dateLinks":  dateLinks,
+			"config":    cfg,
+			"files":     files,
+			"date":      datePath,
+			"allUpload": allUpload,
+			"search":    search,
+			"listDate":  listDate,
+			"yesterday": yesterday,
+			"dateLinks": dateLinks,
 		})
 	}
 }
@@ -1242,7 +1244,7 @@ func Filer(cfg *config.Config) gin.HandlerFunc {
 
 		// 获取目录列表和文件列表
 		dirs := service.GetDirList("." + reqPath)
-		files := service.GetFileList("." + reqPath + "*.*", cfg.ShowSort)
+		files := service.GetFileList("."+reqPath+"*.*", cfg.ShowSort)
 
 		// 计算上级目录
 		parentPath := ""
@@ -1417,11 +1419,11 @@ func ImageURLListAPI(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"total":      total,
-			"page":       page,
-			"page_size":  pageSize,
+			"total":       total,
+			"page":        page,
+			"page_size":   pageSize,
 			"total_pages": (total + pageSize - 1) / pageSize,
-			"files":      files,
+			"files":       files,
 		})
 	}
 }
@@ -1429,9 +1431,9 @@ func ImageURLListAPI(cfg *config.Config) gin.HandlerFunc {
 func AdminDelete(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			URL   string `json:"url"`
-			Mode  string `json:"mode"`
-			Date  string `json:"date"`
+			URL  string `json:"url"`
+			Mode string `json:"mode"`
+			Date string `json:"date"`
 		}
 
 		if err := c.ShouldBindJSON(&req); err != nil {

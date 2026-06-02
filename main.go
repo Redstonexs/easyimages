@@ -85,9 +85,9 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	// 设置multipart表单的最大内存限制
-	// 设为128MB，让大文件尽量留在内存中避免临时文件I/O开销
-	r.MaxMultipartMemory = 128 << 20 // 128MB
+	// 设置 multipart 表单的内存阈值。高并发上传时，过大的内存缓冲会快速放大
+	// RSS 和 GC 压力；超过阈值的部分由 net/http 使用临时文件承接。
+	r.MaxMultipartMemory = 16 << 20 // 16MB
 
 	// 注册自定义模板函数
 	r.SetFuncMap(template.FuncMap{

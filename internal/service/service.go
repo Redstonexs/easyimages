@@ -16,7 +16,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +42,8 @@ var (
 )
 
 const sessionMaxAge = 14 * 24 * time.Hour // 14天过期
+
+var thumbnailLocks sync.Map // map[thumbPath]*sync.Mutex
 
 func init() {
 	// 定时清理过期 session（每小时一次），避免在登录路径上遍历整个 sync.Map
@@ -90,8 +91,8 @@ var (
 )
 
 const (
-	maxLoginAttempts    = 5             // 最大尝试次数
-	loginLockoutWindow  = 5 * time.Minute // 锁定窗口
+	maxLoginAttempts   = 5               // 最大尝试次数
+	loginLockoutWindow = 5 * time.Minute // 锁定窗口
 )
 
 // CheckLoginRateLimit 检查登录速率限制，返回 true 表示允许登录
@@ -364,30 +365,72 @@ func DecryptHideKey(key string, hideKey string) (string, error) {
 
 // GetFileList 获取文件列表
 func GetFileList(pattern string, sortOrder int) []string {
-	// 验证模式字符串安全性
+	files, _ := GetFileListLimited(pattern, sortOrder, 0)
+	return files
+}
+
+// GetFileListLimited returns matching file names and the total match count.
+// It avoids building a full file-name slice when callers only need the first N
+// entries, which keeps large public/history directories from dominating memory
+// and template render time.
+func GetFileListLimited(pattern string, sortOrder, limit int) ([]string, int) {
 	if err := validateGlobPattern(pattern); err != nil {
-		return nil
+		return nil, 0
 	}
-
-	matches, err := filepath.Glob(pattern)
+	dir, filePattern := filepath.Split(pattern)
+	if dir == "" || filePattern == "" {
+		return nil, 0
+	}
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, 0
 	}
 
-	// filepath.Glob 不会返回目录，无需 os.Stat 过滤
-	files := make([]string, 0, len(matches))
-	for _, match := range matches {
-		if err := validateMatchedPath(match); err != nil {
+	files := make([]string, 0)
+	if limit > 0 {
+		files = make([]string, 0, limit)
+	} else {
+		files = make([]string, 0, len(entries))
+	}
+	appendMatch := func(name string) {
+		if limit <= 0 || len(files) < limit {
+			files = append(files, name)
+		}
+	}
+
+	total := 0
+	if sortOrder == 1 {
+		for i := len(entries) - 1; i >= 0; i-- {
+			entry := entries[i]
+			if entry.IsDir() {
+				continue
+			}
+			matched, err := filepath.Match(filePattern, entry.Name())
+			if err != nil {
+				return nil, 0
+			}
+			if matched {
+				total++
+				appendMatch(entry.Name())
+			}
+		}
+		return files, total
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
 			continue
 		}
-		files = append(files, filepath.Base(match))
+		matched, err := filepath.Match(filePattern, entry.Name())
+		if err != nil {
+			return nil, 0
+		}
+		if matched {
+			total++
+			appendMatch(entry.Name())
+		}
 	}
-
-	if sortOrder == 1 {
-		slices.Reverse(files)
-	}
-
-	return files
+	return files, total
 }
 
 // internalDirs 系统内部目录集合，不应出现在文件浏览和 URL 列表中。
@@ -398,6 +441,7 @@ var internalDirs = map[string]bool{
 	"recycle": true,
 	"chunks":  true,
 	"admin":   true,
+	"webp":    true,
 }
 
 // isInternalPath 检查路径的顶层目录是否为系统内部目录。
@@ -570,7 +614,16 @@ type DirStats struct {
 func CollectDirStats(dir string) DirStats {
 	stats := DirStats{ByExt: make(map[string]int)}
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			if path != dir {
+				rel, err := filepath.Rel(dir, path)
+				if err == nil && isInternalPath(filepath.ToSlash(rel)) {
+					return filepath.SkipDir
+				}
+			}
 			return nil
 		}
 		stats.TotalFiles++
@@ -732,6 +785,20 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 		return thumbPath, nil
 	}
 
+	lockValue, _ := thumbnailLocks.LoadOrStore(thumbPath, &sync.Mutex{})
+	thumbLock := lockValue.(*sync.Mutex)
+	thumbLock.Lock()
+	defer func() {
+		thumbLock.Unlock()
+		thumbnailLocks.Delete(thumbPath)
+	}()
+
+	// Double-check after acquiring the per-thumbnail lock. This prevents cache
+	// stampedes when many clients request the same uncached thumbnail.
+	if _, err := os.Stat(thumbPath); err == nil {
+		return thumbPath, nil
+	}
+
 	// 打开原始图片（cleanPath 由 getSafePath 通过 Rel+Join 重建，非污点值）
 	srcImg, err := imaging.Open(cleanPath)
 	if err != nil {
@@ -842,7 +909,7 @@ func SanitizePath(pathStr string) (string, error) {
 }
 
 // sanitizeFilename 清理文件名，移除危险字符
-func sanitizeFilename(name string) string	{
+func sanitizeFilename(name string) string {
 	// 只保留字母、数字、下划线、连字符和点
 	var result strings.Builder
 	for _, c := range name {

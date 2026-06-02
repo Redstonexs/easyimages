@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"easyimage/config"
@@ -26,9 +27,30 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// 并发限制：限制同时进行的图片后处理 goroutine 数量，避免在大量上传时耗尽 CPU/内存。
-// 值为 CPU 核心数，CPU 密集型工作的最优并发度。
-var processSem = make(chan struct{}, runtime.NumCPU())
+type imageProcessJob struct {
+	filePath string
+	cfg      *config.Config
+}
+
+var imageProcessQueue = make(chan imageProcessJob, runtime.NumCPU()*64)
+
+var (
+	cwebpOnce    sync.Once
+	cwebpLogOnce sync.Once
+	cwebpPath    string
+	cwebpErr     error
+)
+
+func init() {
+	workers := runtime.NumCPU()
+	for i := 0; i < workers; i++ {
+		go func() {
+			for job := range imageProcessQueue {
+				ProcessImageAfterUpload(job.filePath, job.cfg)
+			}
+		}()
+	}
+}
 
 // ProcessUpload 处理上传文件
 func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config.Config, from string) map[string]interface{} {
@@ -138,7 +160,7 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	}
 
 	// 异步处理图片后处理（压缩、水印、格式转换、WebP转换）
-	go ProcessImageAfterUpload(filePath, cfg)
+	StartImagePostProcess(filePath, cfg)
 
 	// 生成WebP URL（如果配置了WebP转换）
 	// WebP 文件存储在 cfg.Path + "webp/" 下，镜像原始目录结构
@@ -406,7 +428,7 @@ func ConvertImage(imgPath, format string) (string, error) {
 
 	if format == "webp" {
 		// WebP 需要使用 cwebp CLI 编码（imaging 库不支持 WebP 编码）
-		cwebpPath, err := exec.LookPath("cwebp")
+		cwebpPath, err := getCwebpPath()
 		if err != nil {
 			return "", fmt.Errorf("cwebp not found, cannot convert to webp: %w", err)
 		}
@@ -550,10 +572,14 @@ func GenerateImageHash(path string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-// ProcessImageAfterUpload 上传后处理图片（通过 processSem 限制并发数）
+// StartImagePostProcess queues post-processing behind a fixed worker pool.
+// This preserves fast upload responses while bounding CPU-heavy image work.
+func StartImagePostProcess(filePath string, cfg *config.Config) {
+	imageProcessQueue <- imageProcessJob{filePath: filePath, cfg: cfg}
+}
+
+// ProcessImageAfterUpload 上传后处理图片。
 func ProcessImageAfterUpload(filePath string, cfg *config.Config) {
-	processSem <- struct{}{}        // 获取令牌，阻塞 if 已达上限
-	defer func() { <-processSem }() // 归还令牌
 
 	// 压缩
 	if cfg.Compress == 1 {
@@ -634,10 +660,11 @@ func ConvertToWebP(imgPath string, cfg *config.Config) error {
 
 	// 使用 cwebp 命令行工具转换（Go 标准库和 x/image 均无 WebP 编码器）
 	// cwebp -q <quality> input -o output
-	cwebpPath, lookErr := exec.LookPath("cwebp")
+	cwebpPath, lookErr := getCwebpPath()
 	if lookErr != nil {
-		// cwebp 未安装，只在首次报错（避免日志洪水）
-		log.Printf("[WebP] cwebp 未安装，跳过 WebP 转换。请安装 libwebp-tools (apk add libwebp-tools)")
+		cwebpLogOnce.Do(func() {
+			log.Printf("[WebP] cwebp 未安装，跳过 WebP 转换。请安装 libwebp-tools (apk add libwebp-tools)")
+		})
 		return fmt.Errorf("cwebp not found: %w", lookErr)
 	}
 	cmd := exec.Command(cwebpPath, "-q", fmt.Sprintf("%d", quality), imgPath, "-o", webpPath)
@@ -689,7 +716,7 @@ func BatchConvertToWebP(cfg *config.Config) BatchWebPResult {
 	var result BatchWebPResult
 
 	// cwebp 不可用时直接返回
-	if _, err := exec.LookPath("cwebp"); err != nil {
+	if _, err := getCwebpPath(); err != nil {
 		log.Printf("[BatchWebP] cwebp 未安装，无法执行批量转换")
 		return result
 	}
@@ -755,6 +782,13 @@ func BatchConvertToWebP(cfg *config.Config) BatchWebPResult {
 	})
 
 	return result
+}
+
+func getCwebpPath() (string, error) {
+	cwebpOnce.Do(func() {
+		cwebpPath, cwebpErr = exec.LookPath("cwebp")
+	})
+	return cwebpPath, cwebpErr
 }
 
 // GetAllowedExtensions 获取允许的扩展名
