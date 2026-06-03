@@ -19,6 +19,8 @@ EasyImage 是一个无数据库图床服务。当前仓库已以 Go 版本为主
 ## 快速开始
 
 ```bash
+npm ci
+npm run build
 go build -o easyimage .
 ./easyimage
 ```
@@ -64,6 +66,7 @@ curl -X POST http://localhost:8080/api/index \
 ├── internal/                # handler、middleware、service
 ├── templates/               # Go HTML 模板
 ├── public/                  # 静态资源
+├── public/dist/             # 前端构建产物，本地生成，不提交
 ├── cmd/php2json/            # 手动 PHP 配置转换工具
 ├── cmd/migrate_test/        # 迁移状态检查工具
 ├── docs/                    # 用户文档
@@ -93,10 +96,14 @@ cp /path/to/php/config/api_key.php config/
 ```bash
 go test ./...
 go vet ./...
+npm run typecheck
+npm run build
 go build -o easyimage .
 go run ./cmd/php2json config/config.php config/config.json
 go run ./cmd/migrate_test
 ```
+
+`public/dist/` 是 Vite 构建输出，已在 `.gitignore` 中排除。本地直接运行二进制前需要先执行 `npm run build`；Docker 镜像构建会自动生成这些前端资源。
 
 WebP 转换依赖外部 `cwebp` 命令。Docker 镜像已安装 `libwebp-tools`，本地运行需要自行安装并放到 `PATH`。
 

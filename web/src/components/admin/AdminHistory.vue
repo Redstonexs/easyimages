@@ -11,23 +11,27 @@ const loading = ref(true)
 const gallery = ref<GalleryBootstrap | null>(null)
 const selectedImage = ref<GalleryFile | null>(null)
 const failedThumbs = ref<Set<string>>(new Set())
+const queryInput = ref('')
 
 const activeDate = computed(() => gallery.value?.date || '')
-const activeSearch = computed(() => gallery.value?.search || '')
+const activeExt = computed(() => gallery.value?.ext || gallery.value?.search || '')
 
-function query(next: Partial<{ date: string; search: string }>) {
+function query(next: Partial<{ date: string; ext: string; q: string }>) {
   const params = new URLSearchParams()
   const date = next.date ?? gallery.value?.date
-  const search = next.search ?? gallery.value?.search
+  const ext = next.ext ?? (gallery.value?.ext || gallery.value?.search)
+  const q = next.q ?? gallery.value?.q
   if (date && date !== gallery.value?.today) params.set('date', date)
-  if (search) params.set('search', search)
+  if (ext) params.set('ext', ext)
+  if (q) params.set('q', q)
   return params
 }
 
-async function load(next: Partial<{ date: string; search: string }> = {}) {
+async function load(next: Partial<{ date: string; ext: string; q: string }> = {}) {
   loading.value = true
   try {
     gallery.value = await adminApi.history(query(next))
+    queryInput.value = gallery.value.q || ''
   } catch (error) {
     emit('notice', error instanceof Error ? error.message : '加载失败', 'danger')
   } finally {
@@ -53,6 +57,15 @@ async function remove(file: GalleryFile) {
 
 function markFailed(url: string) { failedThumbs.value = new Set([...failedThumbs.value, url]) }
 
+function displayName(file: GalleryFile) { return file.original_name || file.name }
+
+function submitSearch() { void load({ q: queryInput.value.trim() }) }
+
+function clearSearch() {
+  queryInput.value = ''
+  void load({ q: '' })
+}
+
 onMounted(() => load())
 </script>
 
@@ -66,17 +79,26 @@ onMounted(() => load())
         <button v-for="link in gallery.date_links" :key="link.date" class="btn btn-default hidden-xs" @click="load({ date: link.date })">{{ link.label }}</button>
       </div>
       <div class="btn-group">
-        <button class="btn btn-sm" :class="activeSearch === '' ? 'btn-info' : 'btn-default'" @click="load({ search: '' })">全部</button>
-        <button v-for="ext in gallery.extensions" :key="ext" class="btn btn-sm" :class="activeSearch === ext ? 'btn-info' : 'btn-default'" @click="load({ search: ext })">{{ ext.toUpperCase() }}</button>
+        <button class="btn btn-sm" :class="activeExt === '' ? 'btn-info' : 'btn-default'" @click="load({ ext: '' })">全部</button>
+        <button v-for="ext in gallery.extensions" :key="ext" class="btn btn-sm" :class="activeExt === ext ? 'btn-info' : 'btn-default'" @click="load({ ext })">{{ ext.toUpperCase() }}</button>
       </div>
+      <form class="admin-search" role="search" @submit.prevent="submitSearch">
+        <input v-model="queryInput" type="search" class="form-control" placeholder="搜索原文件名或存储文件名">
+        <button type="submit" class="btn btn-primary">搜索</button>
+        <button v-if="gallery.q" type="button" class="btn btn-default" @click="clearSearch">清空</button>
+      </form>
     </div>
 
-    <section class="admin-gallery">
+    <section v-if="gallery.files.length" class="admin-gallery">
       <article v-for="file in gallery.files" :key="file.url" class="admin-card">
         <button class="image-button" @click="selectedImage = file">
-          <span v-if="failedThumbs.has(file.url)" class="thumb-fallback">{{ file.name }}</span>
-          <img v-else :src="file.thumb_url" :alt="file.name" loading="lazy" decoding="async" fetchpriority="low" @error="markFailed(file.url)">
+          <span v-if="failedThumbs.has(file.url)" class="thumb-fallback">{{ displayName(file) }}</span>
+          <img v-else :src="file.thumb_url" :alt="displayName(file)" loading="lazy" decoding="async" fetchpriority="low" @error="markFailed(file.url)">
         </button>
+        <div class="admin-card-meta">
+          <strong :title="displayName(file)">{{ displayName(file) }}</strong>
+          <small v-if="file.original_name" :title="file.name">{{ file.name }}</small>
+        </div>
         <div class="admin-card-actions">
           <button class="btn btn-xs btn-primary" @click="copy(file.url)">复制</button>
           <a class="btn btn-xs btn-info" :href="file.info_url" target="_blank">详情</a>
@@ -84,6 +106,37 @@ onMounted(() => load())
         </div>
       </article>
     </section>
+    <div v-else class="alert alert-info">{{ gallery.q ? '没有匹配的图片。' : '该日期还没有上传的图片。' }}</div>
   </template>
-  <div v-if="selectedImage" class="lightbox" @click.self="selectedImage = null"><img :src="selectedImage.url" :alt="selectedImage.name"></div>
+  <div v-if="selectedImage" class="lightbox" @click.self="selectedImage = null"><img :src="selectedImage.url" :alt="displayName(selectedImage)"></div>
 </template>
+
+<style scoped>
+.admin-search {
+  display: flex;
+  flex: 1 1 320px;
+  gap: 8px;
+}
+
+.admin-card-meta {
+  padding: 8px 10px 42px;
+  background: #fff;
+}
+
+.admin-card-meta strong,
+.admin-card-meta small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-card-meta small {
+  margin-top: 3px;
+  color: #777;
+}
+
+@media (max-width: 640px) {
+  .admin-search { flex-direction: column; }
+}
+</style>

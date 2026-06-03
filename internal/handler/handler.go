@@ -306,17 +306,18 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 			}
 		}
 
-		if filename == "" {
-			filename = "upload"
+		originalName := service.OriginalUploadName(filename)
+		if originalName == "" {
+			originalName = "upload"
 		}
-		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
-		if !service.IsAllowedExtension(filename, cfg) {
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(originalName), "."))
+		if !service.IsAllowedExtension(originalName, cfg) {
 			os.RemoveAll(chunkDir)
 			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "不支持的文件格式: " + ext})
 			return
 		}
 
-		baseName := strings.TrimSuffix(filename, filepath.Ext(filename))
+		baseName := strings.TrimSuffix(originalName, filepath.Ext(originalName))
 		newFileName := service.GenerateFileName(baseName, cfg.ImgName) + "." + ext
 		now := time.Now()
 		storagePath := cfg.StoragePath
@@ -403,6 +404,7 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		service.StartImagePostProcess(finalPath, cfg)
+		service.SaveImageMetadata(relativePath, originalName, totalSize, "web", now)
 
 		// 生成WebP URL（与 ProcessUpload 保持一致）
 		webpURL := ""
@@ -416,7 +418,7 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{
 			"result": "success", "code": 200,
-			"url": imageURL, "srcName": baseName, "thumb": thumbURL, "del": delURL, "webp_url": webpURL,
+			"url": imageURL, "srcName": baseName, "original_name": originalName, "thumb": thumbURL, "del": delURL, "webp_url": webpURL,
 		})
 	}
 }

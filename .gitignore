@@ -12,6 +12,12 @@ php2json
 *.test
 *.out
 
+# Frontend dependencies and build output
+node_modules/
+dist/
+build/
+public/dist/
+
 # IDE
 .idea/
 .vscode/
@@ -32,6 +38,7 @@ config/php_backup/
 
 # Logs
 admin/logs/
+admin/logs/metadata/
 
 # Image storage
 i/*
@@ -40,4 +47,3 @@ i/*
 # Temp
 *.tmp
 *.log
-node_modules

@@ -16,9 +16,10 @@ const loading = ref(false)
 const selectedImage = ref<GalleryFile | null>(null)
 const notices = ref<Notice[]>([])
 const failedThumbs = ref<Set<string>>(new Set())
+const queryInput = ref(props.bootstrap.q || '')
 
 const activeDate = computed(() => gallery.value.date)
-const activeSearch = computed(() => gallery.value.search)
+const activeExt = computed(() => gallery.value.ext || gallery.value.search)
 
 function notify(message: string, type: NoticeType = 'info') {
   const notice = createNotice(message, type)
@@ -28,18 +29,20 @@ function notify(message: string, type: NoticeType = 'info') {
   }, 3200)
 }
 
-function buildQuery(next: Partial<{ date: string; search: string; num: number }>) {
+function buildQuery(next: Partial<{ date: string; ext: string; q: string; num: number }>) {
   const params = new URLSearchParams()
   const date = next.date ?? gallery.value.date
-  const search = next.search ?? gallery.value.search
+  const ext = next.ext ?? (gallery.value.ext || gallery.value.search)
+  const q = next.q ?? gallery.value.q
   const num = next.num ?? gallery.value.limit
   if (date && date !== gallery.value.today) params.set('date', date)
-  if (search) params.set('search', search)
+  if (ext) params.set('ext', ext)
+  if (q) params.set('q', q)
   if (num !== gallery.value.limit) params.set('num', String(num))
   return params
 }
 
-async function loadGallery(next: Partial<{ date: string; search: string; num: number }>) {
+async function loadGallery(next: Partial<{ date: string; ext: string; q: string; num: number }>) {
   const pageParams = buildQuery(next)
   const apiParams = new URLSearchParams(pageParams)
   apiParams.set('num', String(next.num ?? gallery.value.limit))
@@ -48,6 +51,7 @@ async function loadGallery(next: Partial<{ date: string; search: string; num: nu
   try {
     const nextGallery = await fetchJSON<GalleryBootstrap>(`/api/list?${apiParams.toString()}`)
     gallery.value = nextGallery
+    queryInput.value = nextGallery.q || ''
     const pageQuery = pageParams.toString()
     window.history.pushState(null, '', pageQuery ? `/app/list?${pageQuery}` : '/app/list')
   } catch (error) {
@@ -55,6 +59,15 @@ async function loadGallery(next: Partial<{ date: string; search: string; num: nu
   } finally {
     loading.value = false
   }
+}
+
+function submitSearch() {
+  void loadGallery({ q: queryInput.value.trim() })
+}
+
+function clearSearch() {
+  queryInput.value = ''
+  void loadGallery({ q: '' })
 }
 
 async function copy(url: string) {
@@ -76,6 +89,10 @@ function closeImage() {
 
 function markThumbFailed(url: string) {
   failedThumbs.value = new Set([...failedThumbs.value, url])
+}
+
+function displayName(file: GalleryFile) {
+  return file.original_name || file.name
 }
 </script>
 
@@ -104,19 +121,24 @@ function markThumbFailed(url: string) {
         </button>
       </div>
       <div class="btn-group">
-        <button type="button" class="btn btn-sm" :class="activeSearch === '' ? 'btn-info' : 'btn-default'" :disabled="loading" @click="loadGallery({ search: '' })">全部</button>
+        <button type="button" class="btn btn-sm" :class="activeExt === '' ? 'btn-info' : 'btn-default'" :disabled="loading" @click="loadGallery({ ext: '' })">全部</button>
         <button
           v-for="extension in gallery.extensions"
           :key="extension"
           type="button"
           class="btn btn-sm"
-          :class="activeSearch === extension ? 'btn-info' : 'btn-default'"
+          :class="activeExt === extension ? 'btn-info' : 'btn-default'"
           :disabled="loading"
-          @click="loadGallery({ search: extension })"
+          @click="loadGallery({ ext: extension })"
         >
           {{ extension.toUpperCase() }}
         </button>
       </div>
+      <form class="gallery-search" role="search" @submit.prevent="submitSearch">
+        <input v-model="queryInput" type="search" class="form-control" placeholder="搜索原文件名或存储文件名" :disabled="loading">
+        <button type="submit" class="btn btn-primary" :disabled="loading">搜索</button>
+        <button v-if="gallery.q" type="button" class="btn btn-default" :disabled="loading" @click="clearSearch">清空</button>
+      </form>
     </section>
 
     <div v-if="loading" class="gallery-loading">正在加载...</div>
@@ -125,12 +147,12 @@ function markThumbFailed(url: string) {
         <button type="button" class="image-button" @click="openImage(file)">
           <span v-if="failedThumbs.has(file.url)" class="thumb-fallback">
             <i class="icon icon-picture" aria-hidden="true"></i>
-            <span>{{ file.name }}</span>
+            <span>{{ displayName(file) }}</span>
           </span>
           <img
             v-else
             :src="file.thumb_url"
-            :alt="file.name"
+            :alt="displayName(file)"
             width="320"
             height="240"
             loading="lazy"
@@ -139,6 +161,10 @@ function markThumbFailed(url: string) {
             @error="markThumbFailed(file.url)"
           >
         </button>
+        <div class="gallery-card-meta">
+          <strong :title="displayName(file)">{{ displayName(file) }}</strong>
+          <small v-if="file.original_name" :title="file.name">{{ file.name }}</small>
+        </div>
         <div class="gallery-card-actions">
           <a :href="file.url" target="_blank" rel="noopener" title="打开"><i class="icon icon-picture"></i></a>
           <button type="button" title="复制链接" @click="copy(file.url)"><i class="icon icon-copy"></i></button>
@@ -147,7 +173,7 @@ function markThumbFailed(url: string) {
         </div>
       </article>
     </section>
-    <section v-else-if="!loading" class="alert alert-info">该日期还没有上传的图片。</section>
+    <section v-else-if="!loading" class="alert alert-info">{{ gallery.q ? '没有匹配的图片。' : '该日期还没有上传的图片。' }}</section>
 
     <footer class="gallery-footer">
       <a href="/" class="btn btn-primary"><i class="icon icon-upload"></i> 上传图片</a>
@@ -156,9 +182,9 @@ function markThumbFailed(url: string) {
 
   <div v-if="selectedImage" class="lightbox" @click.self="closeImage">
     <figure>
-      <img :src="selectedImage.url" :alt="selectedImage.name">
+      <img :src="selectedImage.url" :alt="displayName(selectedImage)">
       <figcaption>
-        <span>{{ selectedImage.name }}</span>
+        <span>{{ displayName(selectedImage) }}</span>
         <button type="button" class="btn btn-primary btn-sm" @click="copy(selectedImage.url)">复制链接</button>
         <button type="button" class="btn btn-default btn-sm" @click="closeImage">关闭</button>
       </figcaption>
@@ -195,6 +221,16 @@ function markThumbFailed(url: string) {
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
 }
 
+.gallery-search {
+  display: flex;
+  flex: 1 1 320px;
+  gap: 8px;
+}
+
+.gallery-search .form-control {
+  min-width: 180px;
+}
+
 .gallery-loading {
   margin-bottom: 14px;
   color: #666;
@@ -212,6 +248,24 @@ function markThumbFailed(url: string) {
   border-radius: 14px;
   background: #fff;
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.09);
+}
+
+.gallery-card-meta {
+  padding: 10px 12px 42px;
+  background: #fff;
+}
+
+.gallery-card-meta strong,
+.gallery-card-meta small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-card-meta small {
+  margin-top: 4px;
+  color: #718096;
 }
 
 .image-button {
@@ -320,6 +374,10 @@ function markThumbFailed(url: string) {
 @media (max-width: 640px) {
   .gallery-toolbar {
     align-items: stretch;
+    flex-direction: column;
+  }
+
+  .gallery-search {
     flex-direction: column;
   }
 
