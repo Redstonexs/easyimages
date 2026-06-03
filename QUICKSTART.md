@@ -3,6 +3,7 @@
 ## 环境要求
 
 - Go 1.21+
+- Node.js 22+，用于构建前端资源
 - 可选：Docker / Docker Compose
 - 可选：`cwebp`，用于启用 WebP 转换
 
@@ -11,6 +12,8 @@
 ```bash
 git clone https://github.com/Redstonexs/easyimages.git
 cd easyimages
+npm ci
+npm run build
 go build -o easyimage .
 ./easyimage
 ```
@@ -52,6 +55,8 @@ docker-compose logs -f
 cp /path/to/php/config/config.php config/
 cp /path/to/php/config/config.guest.php config/
 cp /path/to/php/config/api_key.php config/
+npm ci
+npm run build
 go build -o easyimage .
 ./easyimage
 ```
@@ -92,5 +97,7 @@ curl -X POST http://localhost:8080/api/index \
 ```bash
 go test ./...
 go vet ./...
+npm run typecheck
+npm run build
 go build -o easyimage .
 ```

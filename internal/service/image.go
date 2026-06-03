@@ -73,8 +73,10 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 		}
 	}
 
+	originalName := OriginalUploadName(fileHeader.Filename)
+
 	// 生成文件名
-	fileName := GenerateFileName(strings.TrimSuffix(fileHeader.Filename, filepath.Ext(fileHeader.Filename)), cfg.ImgName)
+	fileName := GenerateFileName(strings.TrimSuffix(originalName, filepath.Ext(originalName)), cfg.ImgName)
 	newFileName := fileName + "." + ext
 
 	// 生成存储路径
@@ -161,6 +163,7 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 
 	// 异步处理图片后处理（压缩、水印、格式转换、WebP转换）
 	StartImagePostProcess(filePath, cfg)
+	SaveImageMetadata(relativePath, originalName, fileHeader.Size, from, now)
 
 	// 生成WebP URL（如果配置了WebP转换）
 	// WebP 文件存储在 cfg.Path + "webp/" 下，镜像原始目录结构
@@ -174,13 +177,14 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	}
 
 	return map[string]interface{}{
-		"result":   "success",
-		"code":     200,
-		"url":      imageURL,
-		"srcName":  strings.TrimSuffix(fileHeader.Filename, filepath.Ext(fileHeader.Filename)),
-		"thumb":    thumbURL,
-		"del":      delURL,
-		"webp_url": webpURL,
+		"result":        "success",
+		"code":          200,
+		"url":           imageURL,
+		"srcName":       strings.TrimSuffix(originalName, filepath.Ext(originalName)),
+		"original_name": originalName,
+		"thumb":         thumbURL,
+		"del":           delURL,
+		"webp_url":      webpURL,
 	}
 }
 
@@ -575,7 +579,13 @@ func GenerateImageHash(path string) string {
 // StartImagePostProcess queues post-processing behind a fixed worker pool.
 // This preserves fast upload responses while bounding CPU-heavy image work.
 func StartImagePostProcess(filePath string, cfg *config.Config) {
-	imageProcessQueue <- imageProcessJob{filePath: filePath, cfg: cfg}
+	job := imageProcessJob{filePath: filePath, cfg: cfg}
+	select {
+	case imageProcessQueue <- job:
+	default:
+		log.Printf("[PostProcess] queue full, processing asynchronously: %s", filePath)
+		go ProcessImageAfterUpload(job.filePath, job.cfg)
+	}
 }
 
 // ProcessImageAfterUpload 上传后处理图片。

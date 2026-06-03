@@ -6,6 +6,7 @@ EasyImage is a Go rewrite of a PHP image host (图床): one Gin binary, Go HTML 
 
 ## Commands
 
+- Build frontend assets from the repo root: `npm run build`.
 - Build the server from the repo root: `go build -o easyimage .`.
 - Run locally: `./easyimage` (or `./easyimage.exe` on Windows). It listens on `:8080` unless `config/config.json` sets `port`.
 - Docker run/build: `docker-compose up -d`.

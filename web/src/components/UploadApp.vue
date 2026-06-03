@@ -17,11 +17,11 @@ interface ProgressItem {
   name: string
   size: number
   loaded: number
-  status: 'waiting' | 'uploading' | 'success' | 'error'
+  status: 'waiting' | 'uploading' | 'processing' | 'success' | 'error'
   message: string
 }
 
-const CHUNK_SIZE = 5 * 1024 * 1024
+const CHUNK_SIZE = 16 * 1024 * 1024
 const MAX_CONCURRENT_CHUNKS = 4
 const MAX_RETRIES = 3
 
@@ -46,7 +46,11 @@ const externalCaptchaToken = ref('')
 const turnstileRendered = ref(false)
 
 const maxSizeLabel = computed(() => formatSize(props.bootstrap.config.max_size))
-const overallPercent = computed(() => totalSize.value > 0 ? Math.round((uploadedTotal.value / totalSize.value) * 100) : 0)
+const overallPercent = computed(() => {
+  if (totalSize.value === 0) return 0
+  const percent = Math.round((uploadedTotal.value / totalSize.value) * 100)
+  return isUploading.value && percent >= 100 ? 99 : percent
+})
 const overallInfo = computed(() => {
   if (progressItems.value.length === 0) return '准备上传...'
   if (!isUploading.value) {
@@ -56,6 +60,8 @@ const overallInfo = computed(() => {
     if (success === 0) return `上传失败：${failed} 个文件`
     return `${success} 成功, ${failed} 失败`
   }
+  const processingItem = progressItems.value.find(item => item.status === 'processing')
+  if (processingItem) return processingItem.message
   return `上传中 (${activeFileIndex.value}/${progressItems.value.length}): ${formatSize(uploadedTotal.value)} / ${formatSize(totalSize.value)}`
 })
 
@@ -119,8 +125,16 @@ async function handleFiles(fileList: FileList) {
 
     try {
       const result = file.size > CHUNK_SIZE
-        ? await uploadFileChunked(file, loaded => updateFileProgress(item, baseUploaded, loaded))
-        : await uploadFileWhole(file, loaded => updateFileProgress(item, baseUploaded, loaded))
+        ? await uploadFileChunked(
+          file,
+          loaded => updateFileProgress(item, baseUploaded, loaded),
+          message => markFileProcessing(item, baseUploaded, message)
+        )
+        : await uploadFileWhole(
+          file,
+          loaded => updateFileProgress(item, baseUploaded, loaded),
+          message => markFileProcessing(item, baseUploaded, message)
+        )
       item.status = 'success'
       item.loaded = file.size
       item.message = formatSize(file.size)
@@ -145,18 +159,37 @@ async function handleFiles(fileList: FileList) {
 }
 
 function updateFileProgress(item: ProgressItem, baseUploaded: number, loaded: number) {
-  item.loaded = loaded
+  item.loaded = Math.min(loaded, item.size)
   item.message = `${formatSize(loaded)} / ${formatSize(item.size)}`
-  uploadedTotal.value = baseUploaded + loaded
+  uploadedTotal.value = baseUploaded + item.loaded
 }
 
-function uploadFileWhole(file: File, onProgress: (loaded: number) => void): Promise<UploadResult> {
+function markFileProcessing(item: ProgressItem, baseUploaded: number, message: string) {
+  item.status = 'processing'
+  item.loaded = item.size
+  item.message = message
+  uploadedTotal.value = baseUploaded + item.size
+}
+
+function progressPercent(item: ProgressItem) {
+  if (item.size === 0) return 0
+  const percent = Math.round((item.loaded / item.size) * 100)
+  return item.status === 'success' ? percent : Math.min(percent, 99)
+}
+
+function uploadFileWhole(
+  file: File,
+  onProgress: (loaded: number) => void,
+  onProcessing: (message: string) => void
+): Promise<UploadResult> {
   return new Promise((resolve, reject) => {
     const formData = new FormData()
     formData.append('file', file)
     const xhr = new XMLHttpRequest()
     xhr.upload.addEventListener('progress', event => {
-      if (event.lengthComputable) onProgress(event.loaded)
+      if (!event.lengthComputable) return
+      onProgress(Math.min(event.loaded, file.size))
+      if (event.loaded >= event.total) onProcessing('文件已传完，服务器处理中...')
     })
     xhr.addEventListener('load', () => resolveUpload(xhr, resolve, reject))
     xhr.addEventListener('error', () => reject(new Error('网络错误')))
@@ -167,7 +200,11 @@ function uploadFileWhole(file: File, onProgress: (loaded: number) => void): Prom
   })
 }
 
-async function uploadFileChunked(file: File, onProgress: (loaded: number) => void): Promise<UploadResult> {
+async function uploadFileChunked(
+  file: File,
+  onProgress: (loaded: number) => void,
+  onProcessing: (message: string) => void
+): Promise<UploadResult> {
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
   const uploadId = crypto.randomUUID ? crypto.randomUUID() : `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
   const chunkProgress = new Array<number>(totalChunks).fill(0)
@@ -197,7 +234,7 @@ async function uploadFileChunked(file: File, onProgress: (loaded: number) => voi
 
         try {
           await sendChunk(formData, loaded => {
-            chunkProgress[chunkIndex] = loaded
+            chunkProgress[chunkIndex] = Math.min(loaded, end - start)
             updateChunkProgress()
           })
           chunkProgress[chunkIndex] = end - start
@@ -232,16 +269,18 @@ async function uploadFileChunked(file: File, onProgress: (loaded: number) => voi
   mergeData.append('totalChunks', totalChunks.toString())
   mergeData.append('filename', file.name)
   mergeData.append('merge', 'true')
-  return await sendChunk(mergeData, () => undefined)
+  onProgress(file.size)
+  onProcessing('文件已传完，服务器合并处理中...')
+  return await sendChunk(mergeData, () => undefined, '分片合并失败')
 }
 
-function sendChunk(formData: FormData, onProgress: (loaded: number) => void): Promise<UploadResult> {
+function sendChunk(formData: FormData, onProgress: (loaded: number) => void, fallback = '分片上传失败'): Promise<UploadResult> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.upload.addEventListener('progress', event => {
       if (event.lengthComputable) onProgress(event.loaded)
     })
-    xhr.addEventListener('load', () => resolveUpload(xhr, resolve, reject, '分片上传失败'))
+    xhr.addEventListener('load', () => resolveUpload(xhr, resolve, reject, fallback))
     xhr.addEventListener('error', () => reject(new Error('网络错误')))
     xhr.addEventListener('timeout', () => reject(new Error('分片上传超时')))
     xhr.timeout = 120000
@@ -420,7 +459,7 @@ onMounted(() => {
             <span class="file-progress-info">{{ item.message }}</span>
           </div>
           <div class="progress">
-            <div class="progress-bar" :class="item.status === 'error' ? 'progress-bar-danger' : item.status === 'success' ? 'progress-bar-success' : 'progress-bar-info'" :style="{ width: `${Math.round((item.loaded / item.size) * 100)}%` }"></div>
+            <div class="progress-bar" :class="item.status === 'error' ? 'progress-bar-danger' : item.status === 'success' ? 'progress-bar-success' : item.status === 'processing' ? 'progress-bar-warning' : 'progress-bar-info'" :style="{ width: `${progressPercent(item)}%` }"></div>
           </div>
         </article>
       </div>
@@ -430,7 +469,7 @@ onMounted(() => {
           <span class="percentage">{{ overallPercent }}%</span>
         </div>
         <div class="progress">
-          <div class="progress-bar" :class="progressItems.some(item => item.status === 'error') && !isUploading ? 'progress-bar-danger' : 'progress-bar-info'" :style="{ width: `${overallPercent}%` }"></div>
+          <div class="progress-bar" :class="progressItems.some(item => item.status === 'error') && !isUploading ? 'progress-bar-danger' : progressItems.some(item => item.status === 'processing') ? 'progress-bar-warning' : 'progress-bar-info'" :style="{ width: `${overallPercent}%` }"></div>
         </div>
       </div>
     </section>
@@ -581,6 +620,7 @@ onMounted(() => {
 }
 
 .status-uploading { background: #f39c12; animation: pulse 1s infinite; }
+.status-processing { background: #f39c12; animation: pulse 1s infinite; }
 .status-success { background: #06b96f; }
 .status-error { background: #e74c3c; }
 

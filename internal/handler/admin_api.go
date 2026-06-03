@@ -65,11 +65,12 @@ type adminChartPayload struct {
 }
 
 type adminFileEntry struct {
-	Name     string `json:"name"`
-	Path     string `json:"path"`
-	URL      string `json:"url"`
-	ThumbURL string `json:"thumb_url"`
-	WebPURL  string `json:"webp_url,omitempty"`
+	Name         string `json:"name"`
+	OriginalName string `json:"original_name,omitempty"`
+	Path         string `json:"path"`
+	URL          string `json:"url"`
+	ThumbURL     string `json:"thumb_url"`
+	WebPURL      string `json:"webp_url,omitempty"`
 }
 
 type adminURLListData struct {
@@ -435,12 +436,14 @@ func adminFileEntries(basePath string, names []string, cfg *config.Config) []adm
 			continue
 		}
 		relativePath := basePath + name
+		metadata, _ := service.GetImageMetadata(relativePath)
 		files = append(files, adminFileEntry{
-			Name:     name,
-			Path:     relativePath,
-			URL:      cfg.Domain + relativePath,
-			ThumbURL: "/app/thumb?img=" + relativePath,
-			WebPURL:  service.GetWebPURL(relativePath, cfg),
+			Name:         name,
+			OriginalName: metadata.OriginalName,
+			Path:         relativePath,
+			URL:          cfg.Domain + relativePath,
+			ThumbURL:     "/app/thumb?img=" + relativePath,
+			WebPURL:      service.GetWebPURL(relativePath, cfg),
 		})
 	}
 	return files

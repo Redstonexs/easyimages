@@ -668,7 +668,11 @@ func DeleteFile(path string) error {
 		return err
 	}
 
-	return os.Remove(safePath)
+	if err := os.Remove(safePath); err != nil {
+		return err
+	}
+	DeleteImageMetadata(cleanedPath)
+	return nil
 }
 
 // MoveToRecycle 移动到回收站
@@ -697,7 +701,11 @@ func MoveToRecycle(path string, cfg *config.Config) error {
 		return fmt.Errorf("failed to create recycle directory: %w", err)
 	}
 
-	return os.Rename(safeSrcPath, dstPath)
+	if err := os.Rename(safeSrcPath, dstPath); err != nil {
+		return err
+	}
+	DeleteImageMetadata(cfg.Path + relPath)
+	return nil
 }
 
 // RestoreFromRecycle 从回收站恢复

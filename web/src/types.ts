@@ -27,11 +27,13 @@ export interface UploadResult {
   url?: string
   thumb?: string
   srcName?: string
+  original_name?: string
   del?: string
 }
 
 export interface GalleryFile {
   name: string
+  original_name?: string
   path: string
   url: string
   thumb_url: string
@@ -44,6 +46,8 @@ export interface GalleryBootstrap {
   title: string
   date: string
   search: string
+  q: string
+  ext: string
   limit: number
   total: number
   files: GalleryFile[]
@@ -114,6 +118,7 @@ export interface AdminChart {
 
 export interface AdminFileEntry {
   name: string
+  original_name?: string
   path: string
   url: string
   thumb_url: string
