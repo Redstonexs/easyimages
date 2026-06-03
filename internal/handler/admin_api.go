@@ -3,6 +3,7 @@ package handler
 import (
 	"easyimage/config"
 	"easyimage/internal/service"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -75,6 +76,7 @@ type adminFileEntry struct {
 
 type adminURLListData struct {
 	Path       string           `json:"path"`
+	Query      string           `json:"q"`
 	Page       int              `json:"page"`
 	PageSize   int              `json:"page_size"`
 	Total      int              `json:"total"`
@@ -360,13 +362,25 @@ func adminURLListPayload(c *gin.Context, cfg *config.Config) (adminURLListData, 
 	}
 	page := parseBoundedInt(c.DefaultQuery("page", "1"), 1, 1, 100000)
 	pageSize := parseBoundedInt(c.DefaultQuery("page_size", "50"), 50, 1, 200)
+	query := strings.TrimSpace(c.Query("q"))
+	if query != "" && !isSafeListQuery(query) {
+		return adminURLListData{}, fmt.Errorf("invalid search parameter")
+	}
 
 	rawFiles := service.GetFileListRecursive("." + reqPath)
 	allFiles := make([]string, 0, len(rawFiles))
 	for _, name := range rawFiles {
-		if !strings.HasPrefix(name, "webp/") && service.IsImageFile(name) {
-			allFiles = append(allFiles, name)
+		if strings.HasPrefix(name, "webp/") || !service.IsImageFile(name) {
+			continue
 		}
+		if query != "" {
+			relativePath := reqPath + name
+			metadata, _ := service.GetImageMetadata(relativePath)
+			if !adminFileMatchesQuery(name, relativePath, metadata, query) {
+				continue
+			}
+		}
+		allFiles = append(allFiles, name)
 	}
 
 	total := len(allFiles)
@@ -382,12 +396,21 @@ func adminURLListPayload(c *gin.Context, cfg *config.Config) (adminURLListData, 
 
 	return adminURLListData{
 		Path:       reqPath,
+		Query:      query,
 		Page:       page,
 		PageSize:   pageSize,
 		Total:      total,
 		TotalPages: totalPages,
 		Files:      adminFileEntries(reqPath, allFiles[start:end], cfg),
 	}, nil
+}
+
+func adminFileMatchesQuery(name, relativePath string, metadata service.ImageMetadata, query string) bool {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return true
+	}
+	return service.MetadataMatchesQuery(metadata, name, query) || strings.Contains(strings.ToLower(relativePath), query)
 }
 
 func adminFilerPayload(c *gin.Context, cfg *config.Config) (adminFilerData, error) {

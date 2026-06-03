@@ -177,6 +177,10 @@ function progressPercent(item: ProgressItem) {
   return item.status === 'success' ? percent : Math.min(percent, 99)
 }
 
+function resultName(result: UploadResult) {
+  return result.original_name || result.srcName || ''
+}
+
 function uploadFileWhole(
   file: File,
   onProgress: (loaded: number) => void,
@@ -482,6 +486,8 @@ onMounted(() => {
             <img :src="result.thumb || result.url" class="preview-img" alt="preview" loading="lazy">
           </div>
           <div class="col-md-9 result-links">
+            <label>源文件名</label>
+            <div class="result-name" :title="resultName(result)">{{ resultName(result) }}</div>
             <label>直链</label>
             <div class="input-group">
               <input type="text" class="form-control" :value="result.url" readonly>
@@ -489,8 +495,8 @@ onMounted(() => {
             </div>
             <label>Markdown</label>
             <div class="input-group">
-              <input type="text" class="form-control" :value="`![${result.srcName || ''}](${result.url})`" readonly>
-              <span class="input-group-btn"><button type="button" class="btn btn-primary" @click="copy(`![${result.srcName || ''}](${result.url})`)">复制</button></span>
+              <input type="text" class="form-control" :value="`![${resultName(result)}](${result.url})`" readonly>
+              <span class="input-group-btn"><button type="button" class="btn btn-primary" @click="copy(`![${resultName(result)}](${result.url})`)">复制</button></span>
             </div>
             <label>HTML</label>
             <div class="input-group">
@@ -633,6 +639,7 @@ onMounted(() => {
 .link-box { margin: 12px 0; padding: 14px; background: #fff; border-radius: 10px; border: 1px solid #e8eef6; }
 .preview-img { max-width: 200px; max-height: 200px; margin: 10px; border-radius: 8px; }
 .result-links label { margin-top: 8px; color: #666; font-weight: 500; }
+.result-name { padding: 7px 0; word-break: break-all; }
 .delete-link { margin-top: 10px; }
 .upload-actions { margin-top: 30px; }
 .upload-footer { margin-top: 50px; }

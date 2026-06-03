@@ -127,6 +127,7 @@ export interface AdminFileEntry {
 
 export interface AdminURLList {
   path: string
+  q: string
   page: number
   page_size: number
   total: number

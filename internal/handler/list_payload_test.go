@@ -134,6 +134,53 @@ func TestImageListPayloadSearchesOriginalFileName(t *testing.T) {
 	}
 }
 
+func TestImageListPayloadIncludesOriginalNameWithoutQuery(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+
+	date := "2026/06/02/"
+	imageDir := filepath.Join("i", "2026", "06", "02")
+	if err := os.MkdirAll(imageDir, 0755); err != nil {
+		t.Fatalf("create image dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(imageDir, "stored.jpg"), []byte("x"), 0644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+	service.SaveImageMetadata("/i/2026/06/02/stored.jpg", "源文件名.jpg", 1, "web", time.Date(2026, 6, 2, 1, 2, 3, 0, time.UTC))
+
+	req := httptest.NewRequest("GET", "/api/list?date="+date, nil)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = req
+
+	payload, err := imageListPayload(c, &config.Config{
+		Title:      "EasyImage",
+		Domain:     "https://img.example.com",
+		Path:       "/i/",
+		ListDate:   10,
+		ListNumber: 20,
+	})
+	if err != nil {
+		t.Fatalf("imageListPayload() error = %v", err)
+	}
+	if len(payload.Files) != 1 {
+		t.Fatalf("Files length = %d, want 1", len(payload.Files))
+	}
+	if payload.Files[0].OriginalName != "源文件名.jpg" {
+		t.Fatalf("OriginalName = %q", payload.Files[0].OriginalName)
+	}
+}
+
 func TestImageListPayloadSupportsExtAndQueryTogether(t *testing.T) {
 	tmp := t.TempDir()
 	oldWd, err := os.Getwd()

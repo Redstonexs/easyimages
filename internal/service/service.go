@@ -749,7 +749,7 @@ func DeleteDirectory(path string) error {
 // GetImageInfo 获取图片信息
 func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error) {
 	// 验证并获取安全路径
-	safePath, err := getSafePath(img)
+	safePath, err := getSafePathWithConfig(img, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -758,13 +758,21 @@ func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error
 	if err != nil {
 		return nil, err
 	}
+	metadata, _ := GetImageMetadata(img)
+	displayName := info.Name()
+	if metadata.OriginalName != "" {
+		displayName = metadata.OriginalName
+	}
 
 	return map[string]interface{}{
-		"name":    info.Name(),
-		"path":    img,
-		"size":    FormatSize(info.Size()),
-		"modTime": info.ModTime().Format("2006-01-02 15:04:05"),
-		"url":     cfg.Domain + img,
+		"name":         info.Name(),
+		"storedName":   info.Name(),
+		"originalName": metadata.OriginalName,
+		"displayName":  displayName,
+		"path":         img,
+		"size":         FormatSize(info.Size()),
+		"modTime":      info.ModTime().Format("2006-01-02 15:04:05"),
+		"url":          cfg.Domain + img,
 	}, nil
 }
 
@@ -863,7 +871,13 @@ func ValidateURLPath(pathStr, requiredPrefix string) (string, error) {
 // 使用 filepath.Rel + filepath.Join 模式打断 CodeQL 污点链：
 // 先验证用户路径在允许目录内，再用 Rel 提取相对路径，最后从可信基目录重建。
 func getSafePath(userPath string) (string, error) {
-	cfg := config.Get()
+	return getSafePathWithConfig(userPath, config.Get())
+}
+
+func getSafePathWithConfig(userPath string, cfg *config.Config) (string, error) {
+	if cfg == nil || cfg.Path == "" {
+		return "", fmt.Errorf("invalid config path")
+	}
 
 	// 获取允许目录的绝对路径（可信基目录）
 	allowedDir, err := filepath.Abs(filepath.Join(".", cfg.Path))
