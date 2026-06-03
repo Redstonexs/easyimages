@@ -16,14 +16,24 @@
             <div class="panel-body">
                 <div class="row">
                     <div class="col-md-6">
-                        <img src="{{.info.url}}" class="img-responsive" alt="{{.info.name}}" style="max-height: 400px;">
+                        <img src="{{.info.url}}" class="img-responsive" alt="{{.info.displayName}}" style="max-height: 400px;">
                     </div>
                     <div class="col-md-6">
                         <table class="table table-bordered">
                             <tr>
                                 <td><strong>文件名</strong></td>
-                                <td>{{.info.name}}</td>
+                                <td>{{.info.displayName}}</td>
                             </tr>
+                            {{if .info.originalName}}
+                            <tr>
+                                <td><strong>源文件名</strong></td>
+                                <td>{{.info.originalName}}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>存储文件名</strong></td>
+                                <td>{{.info.storedName}}</td>
+                            </tr>
+                            {{end}}
                             <tr>
                                 <td><strong>文件大小</strong></td>
                                 <td>{{.info.size}}</td>

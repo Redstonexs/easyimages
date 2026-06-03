@@ -91,11 +91,10 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 		basePath += "*.*"
 	}
 
-	metadataByPath := map[string]service.ImageMetadata{}
+	metadataByPath := service.LoadImageMetadataForDate(datePath)
 	metadataNeeded := query != ""
 	listLimit := limit
 	if metadataNeeded {
-		metadataByPath = service.LoadImageMetadataForDate(datePath)
 		listLimit = 0
 	}
 	fileNames, total := service.GetFileListLimited(basePath, cfg.ShowSort, listLimit)
