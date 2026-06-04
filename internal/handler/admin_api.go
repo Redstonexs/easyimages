@@ -5,6 +5,7 @@ import (
 	"easyimage/internal/service"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -72,6 +73,10 @@ type adminFileEntry struct {
 	URL          string `json:"url"`
 	ThumbURL     string `json:"thumb_url"`
 	WebPURL      string `json:"webp_url,omitempty"`
+	Ext          string `json:"ext,omitempty"`
+	Size         int64  `json:"size,omitempty"`
+	SizeHuman    string `json:"size_human,omitempty"`
+	ModifiedAt   string `json:"modified_at,omitempty"`
 }
 
 type adminURLListData struct {
@@ -85,6 +90,7 @@ type adminURLListData struct {
 }
 
 type adminFilerData struct {
+	RootPath   string           `json:"root_path"`
 	Path       string           `json:"path"`
 	ParentPath string           `json:"parent_path"`
 	Dirs       []string         `json:"dirs"`
@@ -433,6 +439,7 @@ func adminFilerPayload(c *gin.Context, cfg *config.Config) (adminFilerData, erro
 	}
 
 	return adminFilerData{
+		RootPath:   cfg.Path,
 		Path:       reqPath,
 		ParentPath: parentPath,
 		Dirs:       dirs,
@@ -460,6 +467,14 @@ func adminFileEntries(basePath string, names []string, cfg *config.Config) []adm
 		}
 		relativePath := basePath + name
 		metadata, _ := service.GetImageMetadata(relativePath)
+		ext := strings.TrimPrefix(strings.ToUpper(filepath.Ext(name)), ".")
+		var size int64
+		var sizeHuman, modifiedAt string
+		if info, err := os.Stat("." + relativePath); err == nil {
+			size = info.Size()
+			sizeHuman = service.FormatSize(size)
+			modifiedAt = info.ModTime().Format("2006-01-02 15:04")
+		}
 		files = append(files, adminFileEntry{
 			Name:         name,
 			OriginalName: metadata.OriginalName,
@@ -467,6 +482,10 @@ func adminFileEntries(basePath string, names []string, cfg *config.Config) []adm
 			URL:          cfg.Domain + relativePath,
 			ThumbURL:     "/app/thumb?img=" + relativePath,
 			WebPURL:      service.GetWebPURL(relativePath, cfg),
+			Ext:          ext,
+			Size:         size,
+			SizeHuman:    sizeHuman,
+			ModifiedAt:   modifiedAt,
 		})
 	}
 	return files

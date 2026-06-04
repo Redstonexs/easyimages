@@ -123,6 +123,10 @@ export interface AdminFileEntry {
   url: string
   thumb_url: string
   webp_url?: string
+  ext?: string
+  size?: number
+  size_human?: string
+  modified_at?: string
 }
 
 export interface AdminURLList {
@@ -136,6 +140,7 @@ export interface AdminURLList {
 }
 
 export interface AdminFiler {
+  root_path: string
   path: string
   parent_path: string
   dirs: string[]
