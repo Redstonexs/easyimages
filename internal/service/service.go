@@ -845,8 +845,13 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 
 // ValidateURLPath 验证 URL 路径参数的安全性。
 // 必须在使用用户提供的路径参数前调用（Download、Filer、ImageURLList 等 handler）。
-// filepath.Clean 规范化路径（处理 Windows 反斜杠、多余的 / 和 .），防止 "..\" 绕过。
+// path.Clean 规范化 URL 路径，原始路径段检查防止 "..\" 绕过。
 func ValidateURLPath(pathStr, requiredPrefix string) (string, error) {
+	for _, part := range strings.Split(strings.ReplaceAll(pathStr, "\\", "/"), "/") {
+		if part == ".." {
+			return "", fmt.Errorf("invalid path: contains path traversal")
+		}
+	}
 	// Use path.Clean (not filepath.Clean) for URL paths — filepath.Clean
 	// converts "/" to "\" on Windows, breaking the prefix check below.
 	cleaned := path.Clean(pathStr)

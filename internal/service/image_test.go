@@ -52,6 +52,44 @@ func TestConvertToWebPAcceptsAbsoluteUploadPath(t *testing.T) {
 	}
 }
 
+func TestGetWebPURLReturnsExistingWebPPath(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+
+	webpPath := filepath.Join("i", "webp", "2026", "06", "02", "photo.webp")
+	if err := os.MkdirAll(filepath.Dir(webpPath), 0755); err != nil {
+		t.Fatalf("create webp dir: %v", err)
+	}
+	if err := os.WriteFile(webpPath, []byte("fake webp"), 0644); err != nil {
+		t.Fatalf("write webp: %v", err)
+	}
+
+	cfg := &config.Config{Domain: "https://img.example.com", Path: "/i/"}
+	got := GetWebPURL("/i/2026/06/02/photo.jpg", cfg)
+	want := "https://img.example.com/i/webp/2026/06/02/photo.webp"
+	if got != want {
+		t.Fatalf("GetWebPURL() = %q, want %q", got, want)
+	}
+}
+
+func TestGetWebPURLRejectsTraversalPath(t *testing.T) {
+	cfg := &config.Config{Domain: "https://img.example.com", Path: "/i/"}
+	if got := GetWebPURL("/i/2026/../../config/config.json", cfg); got != "" {
+		t.Fatalf("GetWebPURL() = %q, want empty string", got)
+	}
+}
+
 func TestStartImagePostProcessDoesNotBlockWhenQueueIsFull(t *testing.T) {
 	originalQueue := imageProcessQueue
 	imageProcessQueue = make(chan imageProcessJob)

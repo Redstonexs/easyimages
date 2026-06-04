@@ -691,25 +691,100 @@ func ConvertToWebP(imgPath string, cfg *config.Config) error {
 // WebP 文件存储在 cfg.Path/webp/ 下，镜像原始目录结构。
 // 例如: /i/2026/05/08/xxx.jpg → /i/webp/2026/05/08/xxx.webp
 func GetWebPURL(originalPath string, cfg *config.Config) string {
-	ext := strings.ToLower(filepath.Ext(originalPath))
-	if ext == ".webp" {
-		return cfg.Domain + originalPath
+	cleanPath, err := ValidateURLPath(originalPath, cfg.Path)
+	if err != nil {
+		return ""
+	}
+	cleanPath = strings.TrimSuffix(cleanPath, "/")
+	prefix := cfg.Path
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	if !strings.HasPrefix(cleanPath, prefix) {
+		return ""
 	}
 
-	// WebP 存储在 cfg.Path + "webp/" + 原始相对路径（替换扩展名）
-	// originalPath 如: /i/2026/05/08/xxx.jpg
-	// 期望 webpPath: /i/webp/2026/05/08/xxx.webp
-	relToRoot := strings.TrimPrefix(originalPath, cfg.Path)
-	webpRelPath := "webp/" + strings.TrimSuffix(relToRoot, filepath.Ext(relToRoot)) + ".webp"
-	webpURLPath := cfg.Path + webpRelPath
-	webpFsPath := filepath.Join(".", webpURLPath)
+	ext := strings.ToLower(filepath.Ext(cleanPath))
+	if ext == ".webp" {
+		return cfg.Domain + cleanPath
+	}
+
+	storageDir, err := filepath.Abs("." + cfg.Path)
+	if err != nil {
+		return ""
+	}
+	webpRelPath, err := safeWebPRelPath(strings.TrimPrefix(cleanPath, prefix))
+	if err != nil {
+		return ""
+	}
+	webpFsPath := filepath.Join(storageDir, webpRelPath)
+	relToStorage, err := filepath.Rel(storageDir, webpFsPath)
+	if err != nil {
+		return ""
+	}
+	if relToStorage == ".." || strings.HasPrefix(relToStorage, ".."+string(filepath.Separator)) || filepath.IsAbs(relToStorage) {
+		return ""
+	}
+	webpFsPath = filepath.Join(storageDir, relToStorage)
 
 	// 检查webp文件是否存在
 	if _, err := os.Stat(webpFsPath); err == nil {
+		webpURLPath := prefix + strings.ReplaceAll(relToStorage, string(filepath.Separator), "/")
 		return cfg.Domain + webpURLPath
 	}
 
 	return ""
+}
+
+func safeWebPRelPath(relURLPath string) (string, error) {
+	parts := strings.Split(relURLPath, "/")
+	if len(parts) == 0 {
+		return "", fmt.Errorf("invalid webp path")
+	}
+
+	webpParts := make([]string, 0, len(parts)+1)
+	webpParts = append(webpParts, "webp")
+	for i, part := range parts {
+		safePart, err := safeWebPPathSegment(part)
+		if err != nil {
+			return "", err
+		}
+		if i == len(parts)-1 {
+			ext := filepath.Ext(safePart)
+			if ext == "" {
+				return "", fmt.Errorf("invalid webp path")
+			}
+			safePart = strings.TrimSuffix(safePart, ext) + ".webp"
+		}
+		webpParts = append(webpParts, safePart)
+	}
+
+	return filepath.Join(webpParts...), nil
+}
+
+func safeWebPPathSegment(segment string) (string, error) {
+	if segment == "" || segment == "." || segment == ".." {
+		return "", fmt.Errorf("invalid webp path")
+	}
+
+	var safe strings.Builder
+	safe.Grow(len(segment))
+	for _, ch := range segment {
+		switch {
+		case ch >= 'a' && ch <= 'z':
+			safe.WriteRune(ch)
+		case ch >= 'A' && ch <= 'Z':
+			safe.WriteRune(ch)
+		case ch >= '0' && ch <= '9':
+			safe.WriteRune(ch)
+		case ch == '_' || ch == '-' || ch == '.':
+			safe.WriteRune(ch)
+		default:
+			return "", fmt.Errorf("invalid webp path")
+		}
+	}
+
+	return safe.String(), nil
 }
 
 // BatchWebPResult 批量 WebP 转换结果
