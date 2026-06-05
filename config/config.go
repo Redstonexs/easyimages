@@ -495,6 +495,7 @@ func getDefaultConfig() *Config {
 		ImageURL:             defaultDomain,
 		User:                 "admin",
 		Password:             defaultPasswordHash,
+		MustLogin:            1,
 		Path:                 "/i/",
 		StoragePath:          "Y/m/d/",
 		Mime:                 "image/*,video/*",

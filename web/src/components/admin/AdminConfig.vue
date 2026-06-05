@@ -132,7 +132,7 @@ onMounted(load)
             <div class="form-row">
               <label>最大上传大小<input v-model.number="config.maxSize" type="number" class="form-control"></label>
               <label>允许扩展名<input v-model="config.extensions" class="form-control"></label>
-              <label>登录上传<select v-model.number="config.mustLogin" class="form-control"><option :value="0">关闭</option><option :value="1">开启</option></select></label>
+              <label>私有模式<select v-model.number="config.mustLogin" class="form-control"><option :value="1">开启：仅登录用户可上传</option><option :value="0">关闭：允许访客上传</option></select></label>
               <label>图片质量<input v-model.number="config.compress_ratio" type="number" min="1" max="100" class="form-control"></label>
             </div>
           </div>

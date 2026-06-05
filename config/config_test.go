@@ -23,3 +23,11 @@ func TestSetDefaultsAddsLocalStorageSource(t *testing.T) {
 		t.Fatalf("default source = %+v, ok=%v", source, ok)
 	}
 }
+
+func TestDefaultConfigEnablesPrivateUploadMode(t *testing.T) {
+	cfg := getDefaultConfig()
+
+	if cfg.MustLogin != 1 {
+		t.Fatalf("MustLogin = %d, want 1", cfg.MustLogin)
+	}
+}
