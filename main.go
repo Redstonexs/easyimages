@@ -194,7 +194,7 @@ func main() {
 	imgGroup.Static("/", "."+cfg.Path)
 
 	// favicon
-	r.StaticFile("/favicon.ico", "./public/images/favicon.ico")
+	r.GET("/favicon.ico", handler.SiteIcon(cfg))
 
 	// 页面路由
 	r.GET("/", handler.Index(cfg))
@@ -244,6 +244,7 @@ func main() {
 		api.GET("/overview", handler.AdminOverviewAPI(cfg))
 		api.GET("/config", handler.AdminConfigAPI(cfg))
 		api.POST("/config", handler.AdminConfigSaveAPI(cfg))
+		api.POST("/site-icon", handler.AdminSiteIconUploadAPI(cfg))
 		api.POST("/batch-webp", handler.AdminBatchWebPAPI(cfg))
 		api.GET("/chart", handler.AdminChartAPI(cfg))
 		api.GET("/history", handler.AdminHistoryAPI(cfg))

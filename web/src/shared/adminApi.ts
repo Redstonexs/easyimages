@@ -9,6 +9,10 @@ export const adminApi = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config)
   }),
+  uploadSiteIcon: (formData: FormData) => fetchJSON<{ result: string; message: string; site_icon: string }>('/admin/api/site-icon', {
+    method: 'POST',
+    body: formData
+  }),
   batchWebP: () => fetchJSON<{ result: string; message: string; total: number; skipped: number; converted: number; failed: number }>('/admin/api/batch-webp', { method: 'POST' }),
   chart: () => fetchJSON<AdminChart>('/admin/api/chart'),
   history: (params: URLSearchParams) => fetchJSON<GalleryBootstrap>(`/admin/api/history?${params.toString()}`),

@@ -17,135 +17,153 @@ const (
 )
 
 type Config struct {
-	Title               string   `json:"title"`
-	Keywords            string   `json:"keywords"`
-	Description         string   `json:"description"`
-	Tips                string   `json:"tips"`
-	NoticeStatus        int      `json:"notice_status"`
-	Notice              string   `json:"notice"`
-	Domain              string   `json:"domain"`
-	ImageURL            string   `json:"imgurl"`
-	User                string   `json:"user"`
-	Password            string   `json:"password"`
-	FtpStatus           int      `json:"ftp_status"`
-	FtpHost             string   `json:"ftp_host"`
-	FtpPort             int      `json:"ftp_port"`
-	FtpUser             string   `json:"ftp_user"`
-	FtpPass             string   `json:"ftp_pass"`
-	FtpMode             int      `json:"ftp_mode"`
-	FtpPasv             int      `json:"ftp_pasv"`
-	FtpSSL              int      `json:"ftp_ssl"`
-	FtpTime             int      `json:"ftp_time"`
-	FtpCompleteDelLocal int      `json:"ftp_complete_del_local"`
-	FtpDellocSync       int      `json:"ftp_delloc_sync"`
-	Captcha             int      `json:"captcha"`
-	CaptchaType         int      `json:"captcha_type"`
-	TurnstileSiteKey    string   `json:"turnstile_site_key"`
-	TurnstileSecretKey  string   `json:"turnstile_secret_key"`
-	RecaptchaSiteKey    string   `json:"recaptcha_site_key"`
-	RecaptchaSecretKey  string   `json:"recaptcha_secret_key"`
-	MustLogin           int      `json:"mustLogin"`
-	APIStatus           int      `json:"apiStatus"`
-	Path                string   `json:"path"`
-	StoragePath         string   `json:"storage_path"`
-	Mime                string   `json:"mime"`
-	ImgName             string   `json:"imgName"`
-	MaxSize             int64    `json:"maxSize"`
-	MaxUploadFiles      int      `json:"maxUploadFiles"`
-	Watermark           int      `json:"watermark"`
-	WaterText           string   `json:"waterText"`
-	WaterPosition       int      `json:"waterPosition"`
-	TextColor           string   `json:"textColor"`
-	TextSize            int      `json:"textSize"`
-	TextFont            string   `json:"textFont"`
-	WaterImg            string   `json:"waterImg"`
-	Extensions          string   `json:"extensions"`
-	Compress            int      `json:"compress"`
-	CompressRatio       int      `json:"compress_ratio"`
-	Thumbnail           int      `json:"thumbnail"`
-	ThumbnailW          int      `json:"thumbnail_w"`
-	ThumbnailH          int      `json:"thumbnail_h"`
-	ImgConvert          string   `json:"imgConvert"`
-	MaxWidth            int      `json:"maxWidth"`
-	MaxHeight           int      `json:"maxHeight"`
-	MinWidth            int      `json:"minWidth"`
-	MinHeight           int      `json:"minHeight"`
-	ImgRatio            int      `json:"imgRatio"`
-	ImageX              int      `json:"image_x"`
-	ImageY              int      `json:"image_y"`
-	ImgRatioQuality     int      `json:"imgRatio_quality"`
-	ImgRatioCrop        int      `json:"imgRatio_crop"`
-	ImgRatioPreserve    int      `json:"imgRatio_preserve_headers"`
-	StaticCDN           int      `json:"static_cdn"`
-	Theme               string   `json:"theme"`
-	StaticCDNURL        string   `json:"static_cdn_url"`
-	TinyPngKey          string   `json:"TinyPng_key"`
-	CheckImg            int      `json:"checkImg"`
-	CheckImgValue       int      `json:"checkImg_value"`
-	ModeratecontentKey  string   `json:"moderatecontent_key"`
-	NsfwjsURL           string   `json:"nsfwjs_url"`
-	ShowSwitch          int      `json:"showSwitch"`
-	History             int      `json:"history"`
-	ShowSort            int      `json:"showSort"`
-	ListNumber          int      `json:"listNumber"`
-	ListDate            int      `json:"listDate"`
-	Customize           string   `json:"customize"`
-	CheckEnv            int      `json:"checkEnv"`
-	Allowed             int      `json:"allowed"`
-	UploadLogs          int      `json:"upload_logs"`
-	CacheFreq           int      `json:"cache_freq"`
-	UploadFirstShow     int      `json:"upload_first_show"`
-	DarkMode            int      `json:"dark-mode"`
-	ShowAdminInc        int      `json:"show_admin_inc"`
-	ShowUserHashDel     int      `json:"show_user_hash_del"`
-	ShowExifInfo        int      `json:"show_exif_info"`
-	InfoRandPic         int      `json:"info_rand_pic"`
-	ChartOn             int      `json:"chart_on"`
-	CheckIP             int      `json:"check_ip"`
-	CheckIPModel        int      `json:"check_ip_model"`
-	CheckIPList         string   `json:"check_ip_list"`
-	Md5Black            int      `json:"md5_black"`
-	Md5Blacklist        string   `json:"md5_blacklist"`
-	AutoDelete          int      `json:"auto_delete"`
-	TimeFormat          string   `json:"time_format"`
-	Timezone            string   `json:"timezone"`
-	IPUploadCounts      int      `json:"ip_upload_counts"`
-	Public              int      `json:"public"`
-	PublicList          []string `json:"public_list"`
-	Language            int      `json:"language"`
-	LoginBg             string   `json:"login_bg"`
-	Report              string   `json:"report"`
-	ImageRecycle        int      `json:"image_recycl"`
-	Tinyfilemanager     int      `json:"tinyfilemanager"`
-	FileManage          int      `json:"file_manage"`
-	DelDir              string   `json:"delDir"`
-	Hide                int      `json:"hide"`
-	HideKey             string   `json:"hide_key"`
-	HidePath            int      `json:"hide_path"`
-	AdminPathStatus     int      `json:"admin_path_status"`
-	GuestPathStatus     int      `json:"guest_path_status"`
-	TokenPathStatus     int      `json:"token_path_status"`
-	TokenSuffixID       int      `json:"token_suffix_ID"`
-	AdminPath           string   `json:"admin_path"`
-	Chunks              int      `json:"chunks"`
-	WebpConvert         int      `json:"webp_convert"`
-	WebpQuality         int      `json:"webp_quality"`
-	NProgressDefault    string   `json:"NProgress_default"`
-	NProgressProgress   string   `json:"NProgress_Progress"`
-	Footer              string   `json:"footer"`
-	AdTop               int      `json:"ad_top"`
-	AdTopInfo           string   `json:"ad_top_info"`
-	AdBot               int      `json:"ad_bot"`
-	AdBotInfo           string   `json:"ad_bot_info"`
-	SetNotice           string   `json:"set_notice"`
-	Terms               string   `json:"terms"`
-	Update              string   `json:"update"`
-	HotlinkProtect      int      `json:"hotlink_protect"`
-	HotlinkDomains      string   `json:"hotlink_domains"`
-	Port                int      `json:"port"`
+	Title                string                `json:"title"`
+	SiteIcon             string                `json:"site_icon"`
+	Keywords             string                `json:"keywords"`
+	Description          string                `json:"description"`
+	Tips                 string                `json:"tips"`
+	NoticeStatus         int                   `json:"notice_status"`
+	Notice               string                `json:"notice"`
+	Domain               string                `json:"domain"`
+	ImageURL             string                `json:"imgurl"`
+	User                 string                `json:"user"`
+	Password             string                `json:"password"`
+	FtpStatus            int                   `json:"ftp_status"`
+	FtpHost              string                `json:"ftp_host"`
+	FtpPort              int                   `json:"ftp_port"`
+	FtpUser              string                `json:"ftp_user"`
+	FtpPass              string                `json:"ftp_pass"`
+	FtpMode              int                   `json:"ftp_mode"`
+	FtpPasv              int                   `json:"ftp_pasv"`
+	FtpSSL               int                   `json:"ftp_ssl"`
+	FtpTime              int                   `json:"ftp_time"`
+	FtpCompleteDelLocal  int                   `json:"ftp_complete_del_local"`
+	FtpDellocSync        int                   `json:"ftp_delloc_sync"`
+	Captcha              int                   `json:"captcha"`
+	CaptchaType          int                   `json:"captcha_type"`
+	TurnstileSiteKey     string                `json:"turnstile_site_key"`
+	TurnstileSecretKey   string                `json:"turnstile_secret_key"`
+	RecaptchaSiteKey     string                `json:"recaptcha_site_key"`
+	RecaptchaSecretKey   string                `json:"recaptcha_secret_key"`
+	MustLogin            int                   `json:"mustLogin"`
+	APIStatus            int                   `json:"apiStatus"`
+	Path                 string                `json:"path"`
+	StoragePath          string                `json:"storage_path"`
+	Mime                 string                `json:"mime"`
+	ImgName              string                `json:"imgName"`
+	MaxSize              int64                 `json:"maxSize"`
+	MaxUploadFiles       int                   `json:"maxUploadFiles"`
+	Watermark            int                   `json:"watermark"`
+	WaterText            string                `json:"waterText"`
+	WaterPosition        int                   `json:"waterPosition"`
+	TextColor            string                `json:"textColor"`
+	TextSize             int                   `json:"textSize"`
+	TextFont             string                `json:"textFont"`
+	WaterImg             string                `json:"waterImg"`
+	Extensions           string                `json:"extensions"`
+	Compress             int                   `json:"compress"`
+	CompressRatio        int                   `json:"compress_ratio"`
+	Thumbnail            int                   `json:"thumbnail"`
+	ThumbnailW           int                   `json:"thumbnail_w"`
+	ThumbnailH           int                   `json:"thumbnail_h"`
+	ImgConvert           string                `json:"imgConvert"`
+	MaxWidth             int                   `json:"maxWidth"`
+	MaxHeight            int                   `json:"maxHeight"`
+	MinWidth             int                   `json:"minWidth"`
+	MinHeight            int                   `json:"minHeight"`
+	ImgRatio             int                   `json:"imgRatio"`
+	ImageX               int                   `json:"image_x"`
+	ImageY               int                   `json:"image_y"`
+	ImgRatioQuality      int                   `json:"imgRatio_quality"`
+	ImgRatioCrop         int                   `json:"imgRatio_crop"`
+	ImgRatioPreserve     int                   `json:"imgRatio_preserve_headers"`
+	StaticCDN            int                   `json:"static_cdn"`
+	Theme                string                `json:"theme"`
+	StaticCDNURL         string                `json:"static_cdn_url"`
+	TinyPngKey           string                `json:"TinyPng_key"`
+	CheckImg             int                   `json:"checkImg"`
+	CheckImgValue        int                   `json:"checkImg_value"`
+	ModeratecontentKey   string                `json:"moderatecontent_key"`
+	NsfwjsURL            string                `json:"nsfwjs_url"`
+	ShowSwitch           int                   `json:"showSwitch"`
+	History              int                   `json:"history"`
+	ShowSort             int                   `json:"showSort"`
+	ListNumber           int                   `json:"listNumber"`
+	ListDate             int                   `json:"listDate"`
+	Customize            string                `json:"customize"`
+	CheckEnv             int                   `json:"checkEnv"`
+	Allowed              int                   `json:"allowed"`
+	UploadLogs           int                   `json:"upload_logs"`
+	CacheFreq            int                   `json:"cache_freq"`
+	UploadFirstShow      int                   `json:"upload_first_show"`
+	DarkMode             int                   `json:"dark-mode"`
+	ShowAdminInc         int                   `json:"show_admin_inc"`
+	ShowUserHashDel      int                   `json:"show_user_hash_del"`
+	ShowExifInfo         int                   `json:"show_exif_info"`
+	InfoRandPic          int                   `json:"info_rand_pic"`
+	ChartOn              int                   `json:"chart_on"`
+	CheckIP              int                   `json:"check_ip"`
+	CheckIPModel         int                   `json:"check_ip_model"`
+	CheckIPList          string                `json:"check_ip_list"`
+	Md5Black             int                   `json:"md5_black"`
+	Md5Blacklist         string                `json:"md5_blacklist"`
+	AutoDelete           int                   `json:"auto_delete"`
+	TimeFormat           string                `json:"time_format"`
+	Timezone             string                `json:"timezone"`
+	IPUploadCounts       int                   `json:"ip_upload_counts"`
+	Public               int                   `json:"public"`
+	PublicList           []string              `json:"public_list"`
+	Language             int                   `json:"language"`
+	LoginBg              string                `json:"login_bg"`
+	Report               string                `json:"report"`
+	ImageRecycle         int                   `json:"image_recycl"`
+	Tinyfilemanager      int                   `json:"tinyfilemanager"`
+	FileManage           int                   `json:"file_manage"`
+	DelDir               string                `json:"delDir"`
+	Hide                 int                   `json:"hide"`
+	HideKey              string                `json:"hide_key"`
+	HidePath             int                   `json:"hide_path"`
+	AdminPathStatus      int                   `json:"admin_path_status"`
+	GuestPathStatus      int                   `json:"guest_path_status"`
+	TokenPathStatus      int                   `json:"token_path_status"`
+	TokenSuffixID        int                   `json:"token_suffix_ID"`
+	AdminPath            string                `json:"admin_path"`
+	Chunks               int                   `json:"chunks"`
+	WebpConvert          int                   `json:"webp_convert"`
+	WebpQuality          int                   `json:"webp_quality"`
+	NProgressDefault     string                `json:"NProgress_default"`
+	NProgressProgress    string                `json:"NProgress_Progress"`
+	Footer               string                `json:"footer"`
+	AdTop                int                   `json:"ad_top"`
+	AdTopInfo            string                `json:"ad_top_info"`
+	AdBot                int                   `json:"ad_bot"`
+	AdBotInfo            string                `json:"ad_bot_info"`
+	SetNotice            string                `json:"set_notice"`
+	Terms                string                `json:"terms"`
+	Update               string                `json:"update"`
+	HotlinkProtect       int                   `json:"hotlink_protect"`
+	HotlinkDomains       string                `json:"hotlink_domains"`
+	DefaultStorageSource string                `json:"default_storage_source"`
+	StorageSources       []StorageSourceConfig `json:"storage_sources"`
+	Port                 int                   `json:"port"`
 
 	// 运行时配置
 	mu sync.RWMutex `json:"-"`
+}
+
+type StorageSourceConfig struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Type              string `json:"type"`
+	Enabled           bool   `json:"enabled"`
+	PublicBaseURL     string `json:"public_base_url"`
+	S3Endpoint        string `json:"s3_endpoint"`
+	S3Region          string `json:"s3_region"`
+	S3Bucket          string `json:"s3_bucket"`
+	S3Prefix          string `json:"s3_prefix"`
+	S3AccessKeyID     string `json:"s3_access_key_id"`
+	S3AccessKeySecret string `json:"s3_access_key_secret"`
+	S3ForcePathStyle  bool   `json:"s3_force_path_style"`
 }
 
 type GuestConfig struct {
@@ -329,6 +347,10 @@ func setDefaults(cfg *Config) {
 	if cfg.StoragePath == "" {
 		cfg.StoragePath = "Y/m/d/"
 	}
+	ensureStorageDefaults(cfg)
+	if cfg.SiteIcon == "" {
+		cfg.SiteIcon = "/favicon.ico"
+	}
 	if cfg.MaxSize == 0 {
 		cfg.MaxSize = 10485760
 	}
@@ -392,51 +414,126 @@ func setDefaults(cfg *Config) {
 	}
 }
 
+func ensureStorageDefaults(cfg *Config) {
+	local := StorageSourceConfig{ID: "local", Name: "本地存储", Type: "local", Enabled: true}
+	if cfg.DefaultStorageSource == "" {
+		cfg.DefaultStorageSource = local.ID
+	}
+	if len(cfg.StorageSources) == 0 {
+		cfg.StorageSources = []StorageSourceConfig{local}
+		return
+	}
+
+	hasLocal := false
+	for i := range cfg.StorageSources {
+		if cfg.StorageSources[i].ID == "" {
+			cfg.StorageSources[i].ID = cfg.StorageSources[i].Type
+		}
+		if cfg.StorageSources[i].Name == "" {
+			cfg.StorageSources[i].Name = cfg.StorageSources[i].ID
+		}
+		if cfg.StorageSources[i].Type == "" {
+			cfg.StorageSources[i].Type = "local"
+		}
+		if cfg.StorageSources[i].ID == "local" {
+			hasLocal = true
+			cfg.StorageSources[i].Type = "local"
+			cfg.StorageSources[i].Enabled = true
+			if cfg.StorageSources[i].Name == "" {
+				cfg.StorageSources[i].Name = local.Name
+			}
+		}
+	}
+	if !hasLocal {
+		cfg.StorageSources = append([]StorageSourceConfig{local}, cfg.StorageSources...)
+	}
+}
+
+func (cfg *Config) StorageSourceByID(id string) (StorageSourceConfig, bool) {
+	if cfg == nil {
+		return StorageSourceConfig{}, false
+	}
+	if id == "" {
+		id = cfg.DefaultStorageSource
+	}
+	if id == "" {
+		id = "local"
+	}
+	for _, source := range cfg.StorageSources {
+		if source.ID == id && source.Enabled {
+			return source, true
+		}
+	}
+	for _, source := range cfg.StorageSources {
+		if source.ID == "local" {
+			return source, true
+		}
+	}
+	return StorageSourceConfig{ID: "local", Name: "本地存储", Type: "local", Enabled: true}, true
+}
+
+func (cfg *Config) EnabledStorageSources() []StorageSourceConfig {
+	if cfg == nil {
+		return nil
+	}
+	sources := make([]StorageSourceConfig, 0, len(cfg.StorageSources))
+	for _, source := range cfg.StorageSources {
+		if source.Enabled {
+			sources = append(sources, source)
+		}
+	}
+	return sources
+}
+
 func getDefaultConfig() *Config {
 	cfg := &Config{
-		Title:           "简单图床 - EasyImage",
-		Keywords:        "简单图床,easyimage,无数据库图床",
-		Description:     "简单图床EasyImage是一款支持多文件上传的无数据库图床",
-		Domain:          defaultDomain,
-		ImageURL:        defaultDomain,
-		User:            "admin",
-		Password:        defaultPasswordHash,
-		Path:            "/i/",
-		StoragePath:     "Y/m/d/",
-		Mime:            "image/*,video/*",
-		ImgName:         "default",
-		MaxSize:         10485760,
-		MaxUploadFiles:  30,
-		Extensions:      "jpg,jpeg,png,gif,bmp,webp,ico,jfif,tif,tga,svg",
-		CompressRatio:   80,
-		Thumbnail:       1,
-		ThumbnailW:      258,
-		ThumbnailH:      258,
-		MaxWidth:        10240,
-		MaxHeight:       10240,
-		MinWidth:        5,
-		MinHeight:       5,
-		Theme:           "default",
-		StaticCDNURL:    "https://fastly.jsdelivr.net/gh/Redstonexs/easyimages",
-		ShowSwitch:      1,
-		History:         1,
-		ShowSort:        1,
-		ListNumber:      20,
-		ListDate:        10,
-		Allowed:         1,
-		DarkMode:        1,
-		ShowAdminInc:    1,
-		ShowUserHashDel: 1,
-		ShowExifInfo:    1,
-		InfoRandPic:     1,
-		ChartOn:         1,
-		ImageRecycle:    1,
-		Timezone:        "Asia/Shanghai",
-		LoginBg:         "../app/bing.php",
-		HideKey:         "EasyImage2.0",
-		AdminPath:       "u",
-		Port:            8080,
-		Update:          time.Now().Format("2006-01-02 15:04:05"),
+		Title:                "简单图床 - EasyImage",
+		SiteIcon:             "/favicon.ico",
+		Keywords:             "简单图床,easyimage,无数据库图床",
+		Description:          "简单图床EasyImage是一款支持多文件上传的无数据库图床",
+		Domain:               defaultDomain,
+		ImageURL:             defaultDomain,
+		User:                 "admin",
+		Password:             defaultPasswordHash,
+		MustLogin:            1,
+		Path:                 "/i/",
+		StoragePath:          "Y/m/d/",
+		Mime:                 "image/*,video/*",
+		ImgName:              "default",
+		MaxSize:              10485760,
+		MaxUploadFiles:       30,
+		Extensions:           "jpg,jpeg,png,gif,bmp,webp,ico,jfif,tif,tga,svg",
+		CompressRatio:        80,
+		Thumbnail:            1,
+		ThumbnailW:           258,
+		ThumbnailH:           258,
+		MaxWidth:             10240,
+		MaxHeight:            10240,
+		MinWidth:             5,
+		MinHeight:            5,
+		Theme:                "default",
+		StaticCDNURL:         "https://fastly.jsdelivr.net/gh/Redstonexs/easyimages",
+		ShowSwitch:           1,
+		History:              1,
+		ShowSort:             1,
+		ListNumber:           20,
+		ListDate:             10,
+		Allowed:              1,
+		DarkMode:             1,
+		ShowAdminInc:         1,
+		ShowUserHashDel:      1,
+		ShowExifInfo:         1,
+		InfoRandPic:          1,
+		ChartOn:              1,
+		ImageRecycle:         1,
+		Timezone:             "Asia/Shanghai",
+		LoginBg:              "../app/bing.php",
+		HideKey:              "EasyImage2.0",
+		AdminPath:            "u",
+		DefaultStorageSource: "local",
+		StorageSources:       []StorageSourceConfig{{ID: "local", Name: "本地存储", Type: "local", Enabled: true}},
+		Port:                 8080,
+		Update:               time.Now().Format("2006-01-02 15:04:05"),
 		PublicList: []string{
 			"time", "today", "yesterday", "total_space",
 			"used_space", "free_space", "image_used", "file", "dir", "month",

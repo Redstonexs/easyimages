@@ -84,36 +84,62 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 		return imageListPayloadData{}, fmt.Errorf("invalid search parameter")
 	}
 
+	metadataItems := service.ListImageMetadataForDate(datePath, cfg.ShowSort == 1)
+	files := make([]imageListFile, 0, limit)
+	total := 0
+	seen := make(map[string]bool, len(metadataItems))
+	for _, metadata := range metadataItems {
+		name := metadata.StoredName
+		if name == "" {
+			name = metadata.Path[strings.LastIndex(metadata.Path, "/")+1:]
+		}
+		if !service.IsImageFile(name) {
+			continue
+		}
+		if ext != "" && !strings.EqualFold(strings.TrimPrefix(name[strings.LastIndex(name, "."):], "."), ext) {
+			continue
+		}
+		if query != "" && !service.MetadataMatchesQuery(metadata, name, query) {
+			continue
+		}
+		total++
+		if len(files) >= limit {
+			continue
+		}
+		relativePath := metadata.Path
+		seen[relativePath] = true
+		files = append(files, imageListFile{
+			Name:         name,
+			OriginalName: metadata.OriginalName,
+			Path:         relativePath,
+			URL:          imageURLForMetadata(cfg, relativePath, metadata),
+			ThumbURL:     thumbURLForMetadata(relativePath, metadata),
+			WebPURL:      service.GetWebPURL(relativePath, cfg),
+			InfoURL:      "/app/info?img=" + relativePath,
+			DownURL:      "/app/down?dw=" + relativePath,
+		})
+	}
+
 	basePath := "." + cfg.Path + datePath
 	if ext != "" {
 		basePath += "*." + ext
 	} else {
 		basePath += "*.*"
 	}
-
-	metadataByPath := service.LoadImageMetadataForDate(datePath)
-	metadataNeeded := query != ""
-	listLimit := limit
-	if metadataNeeded {
-		listLimit = 0
-	}
-	fileNames, total := service.GetFileListLimited(basePath, cfg.ShowSort, listLimit)
-	files := make([]imageListFile, 0, len(fileNames))
-	if metadataNeeded {
-		total = 0
-	}
+	fileNames, _ := service.GetFileListLimited(basePath, cfg.ShowSort, 0)
 	for _, name := range fileNames {
 		if !service.IsImageFile(name) {
 			continue
 		}
 		relativePath := cfg.Path + datePath + name
-		metadata := metadataByPath[relativePath]
+		if seen[relativePath] {
+			continue
+		}
+		metadata, _ := service.GetImageMetadata(relativePath)
 		if query != "" && !service.MetadataMatchesQuery(metadata, name, query) {
 			continue
 		}
-		if metadataNeeded {
-			total++
-		}
+		total++
 		if len(files) >= limit {
 			continue
 		}
@@ -121,8 +147,8 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 			Name:         name,
 			OriginalName: metadata.OriginalName,
 			Path:         relativePath,
-			URL:          cfg.Domain + relativePath,
-			ThumbURL:     "/app/thumb?img=" + relativePath,
+			URL:          imageURLForMetadata(cfg, relativePath, metadata),
+			ThumbURL:     thumbURLForMetadata(relativePath, metadata),
 			WebPURL:      service.GetWebPURL(relativePath, cfg),
 			InfoURL:      "/app/info?img=" + relativePath,
 			DownURL:      "/app/down?dw=" + relativePath,
@@ -152,6 +178,20 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 		DateLinks:  dateLinks,
 		Extensions: []string{"jpg", "png", "gif", "webp"},
 	}, nil
+}
+
+func imageURLForMetadata(cfg *config.Config, relativePath string, metadata service.ImageMetadata) string {
+	if metadata.URL != "" {
+		return metadata.URL
+	}
+	return cfg.Domain + relativePath
+}
+
+func thumbURLForMetadata(relativePath string, metadata service.ImageMetadata) string {
+	if metadata.ThumbURL != "" {
+		return metadata.ThumbURL
+	}
+	return "/app/thumb?img=" + relativePath
 }
 
 func isSafeListExtension(ext string) bool {

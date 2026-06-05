@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"bytes"
 	"easyimage/config"
 	"easyimage/internal/service"
+	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +34,100 @@ func TestAdminConfigFromConfigDoesNotExposeSecrets(t *testing.T) {
 	if !payload.TurnstileSecretSet || !payload.RecaptchaSecretSet {
 		t.Fatal("secret presence flags were not set")
 	}
+	if payload.SiteIcon != cfg.SiteIcon {
+		t.Fatalf("SiteIcon = %q, want %q", payload.SiteIcon, cfg.SiteIcon)
+	}
+}
+
+func TestAdminSiteIconUploadRejectsUnsafeSVG(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+
+	req := siteIconUploadRequest(t, "evil.svg", `<svg onload="alert(1)"></svg>`)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	AdminSiteIconUploadAPI(&config.Config{Title: "EasyImage", SiteIcon: "/favicon.ico"})(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if _, err := os.Stat(filepath.Join("config", "site-icon", "favicon.svg")); !os.IsNotExist(err) {
+		t.Fatalf("unsafe SVG was saved, stat error = %v", err)
+	}
+}
+
+func TestAdminSiteIconUploadSavesIconAndConfig(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+	if err := os.MkdirAll("config", 0755); err != nil {
+		t.Fatalf("create config dir: %v", err)
+	}
+
+	cfg := &config.Config{Title: "EasyImage", SiteIcon: "/favicon.ico"}
+	req := siteIconUploadRequest(t, "favicon.png", "png-bytes")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	AdminSiteIconUploadAPI(cfg)(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !strings.HasPrefix(cfg.SiteIcon, "/favicon.ico?v=") {
+		t.Fatalf("SiteIcon = %q, want cache-busted favicon URL", cfg.SiteIcon)
+	}
+	if _, err := os.Stat(filepath.Join("config", "site-icon", "favicon.png")); err != nil {
+		t.Fatalf("uploaded icon was not saved: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join("config", "config.json")); err != nil {
+		t.Fatalf("config was not saved: %v", err)
+	}
+}
+
+func siteIconUploadRequest(t *testing.T, filename, content string) *http.Request {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("icon", filename)
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte(content)); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/admin/api/site-icon", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
 }
 
 func TestAdminURLListPayloadUsesThumbnails(t *testing.T) {

@@ -52,6 +52,79 @@ func TestImageMetadataSaveLoadAndDelete(t *testing.T) {
 	}
 }
 
+func TestSaveImageMetadataRejectsTraversalPath(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+
+	SaveImageMetadata("/i/2026/../../evil.jpg", "evil.jpg", 1, "web", time.Date(2026, 6, 2, 1, 2, 3, 0, time.UTC))
+
+	if _, err := os.Stat(filepath.Join("admin", "logs", "metadata")); !os.IsNotExist(err) {
+		t.Fatalf("metadata directory stat error = %v, want not exist", err)
+	}
+}
+
+func TestSaveImageMetadataWithStoragePersistsS3Fields(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+
+	SaveImageMetadataWithStorage("/i/2026/06/05/photo.jpg", "photo.jpg", 42, "web", time.Date(2026, 6, 5, 1, 2, 3, 0, time.UTC), "s3-main", "s3", "uploads/2026/06/05/photo.jpg", "https://cdn.example.com/uploads/2026/06/05/photo.jpg", "https://cdn.example.com/uploads/2026/06/05/photo.jpg")
+	metadata, ok := GetImageMetadata("/i/2026/06/05/photo.jpg")
+	if !ok {
+		t.Fatal("metadata not found")
+	}
+	if metadata.StorageSource != "s3-main" || metadata.StorageType != "s3" || metadata.ObjectKey != "uploads/2026/06/05/photo.jpg" {
+		t.Fatalf("metadata storage fields = %+v", metadata)
+	}
+}
+
+func TestLoadImageMetadataForDateRejectsTraversalPath(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+
+	if items := LoadImageMetadataForDate("../"); len(items) != 0 {
+		t.Fatalf("LoadImageMetadataForDate returned %d items, want 0", len(items))
+	}
+}
+
+func TestValidateURLPathRejectsNormalizedTraversal(t *testing.T) {
+	if _, err := ValidateURLPath("/i/2026/../../evil.jpg", "/i/"); err == nil {
+		t.Fatal("ValidateURLPath error = nil, want traversal error")
+	}
+}
+
 func TestOriginalUploadNameStripsClientPath(t *testing.T) {
 	tests := []struct {
 		name string

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,18 +19,27 @@ import (
 const imageMetadataDir = "admin/logs/metadata"
 
 type ImageMetadata struct {
-	Path         string `json:"path"`
-	StoredName   string `json:"stored_name"`
-	OriginalName string `json:"original_name"`
-	OriginalBase string `json:"original_base"`
-	UploadedAt   string `json:"uploaded_at"`
-	Size         int64  `json:"size"`
-	From         string `json:"from"`
+	Path          string `json:"path"`
+	StoredName    string `json:"stored_name"`
+	OriginalName  string `json:"original_name"`
+	OriginalBase  string `json:"original_base"`
+	UploadedAt    string `json:"uploaded_at"`
+	Size          int64  `json:"size"`
+	From          string `json:"from"`
+	StorageSource string `json:"storage_source,omitempty"`
+	StorageType   string `json:"storage_type,omitempty"`
+	ObjectKey     string `json:"object_key,omitempty"`
+	URL           string `json:"url,omitempty"`
+	ThumbURL      string `json:"thumb_url,omitempty"`
 }
 
 var imageMetadataMu sync.Mutex
 
 func SaveImageMetadata(relativePath, originalName string, size int64, from string, uploadedAt time.Time) {
+	SaveImageMetadataWithStorage(relativePath, originalName, size, from, uploadedAt, "local", "local", strings.TrimPrefix(relativePath, metadataStoragePrefix()), "", "")
+}
+
+func SaveImageMetadataWithStorage(relativePath, originalName string, size int64, from string, uploadedAt time.Time, storageSource, storageType, objectKey, url, thumbURL string) {
 	if relativePath == "" || originalName == "" {
 		return
 	}
@@ -39,13 +50,24 @@ func SaveImageMetadata(relativePath, originalName string, size int64, from strin
 	originalName = OriginalUploadName(originalName)
 
 	metadata := ImageMetadata{
-		Path:         relativePath,
-		StoredName:   filepath.Base(relativePath),
-		OriginalName: originalName,
-		OriginalBase: strings.TrimSuffix(originalName, filepath.Ext(originalName)),
-		UploadedAt:   uploadedAt.Format("2006-01-02 15:04:05"),
-		Size:         size,
-		From:         from,
+		Path:          relativePath,
+		StoredName:    filepath.Base(relativePath),
+		OriginalName:  originalName,
+		OriginalBase:  strings.TrimSuffix(originalName, filepath.Ext(originalName)),
+		UploadedAt:    uploadedAt.Format("2006-01-02 15:04:05"),
+		Size:          size,
+		From:          from,
+		StorageSource: storageSource,
+		StorageType:   storageType,
+		ObjectKey:     objectKey,
+		URL:           url,
+		ThumbURL:      thumbURL,
+	}
+	if metadata.StorageSource == "" {
+		metadata.StorageSource = "local"
+	}
+	if metadata.StorageType == "" {
+		metadata.StorageType = "local"
 	}
 	if err := saveImageMetadata(metadata); err != nil {
 		log.Printf("[Metadata] save failed for %s: %v", relativePath, err)
@@ -70,6 +92,9 @@ func GetImageMetadata(relativePath string) (ImageMetadata, bool) {
 		return ImageMetadata{}, false
 	}
 	metadata, ok := items[relativePath]
+	if ok {
+		metadata = normalizeImageMetadata(metadata)
+	}
 	return metadata, ok
 }
 
@@ -106,10 +131,38 @@ func LoadImageMetadataForDate(datePath string) map[string]ImageMetadata {
 	needle := "/" + strings.Trim(datePath, "/") + "/"
 	for path, metadata := range items {
 		if strings.Contains(path, needle) {
-			result[path] = metadata
+			result[path] = normalizeImageMetadata(metadata)
 		}
 	}
 	return result
+}
+
+func ListImageMetadataForDate(datePath string, sortDesc bool) []ImageMetadata {
+	items := LoadImageMetadataForDate(datePath)
+	list := make([]ImageMetadata, 0, len(items))
+	for _, metadata := range items {
+		list = append(list, normalizeImageMetadata(metadata))
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if sortDesc {
+			return list[i].UploadedAt > list[j].UploadedAt
+		}
+		return list[i].UploadedAt < list[j].UploadedAt
+	})
+	return list
+}
+
+func normalizeImageMetadata(metadata ImageMetadata) ImageMetadata {
+	if metadata.StorageSource == "" {
+		metadata.StorageSource = "local"
+	}
+	if metadata.StorageType == "" {
+		metadata.StorageType = "local"
+	}
+	if metadata.ObjectKey == "" {
+		metadata.ObjectKey = strings.TrimPrefix(metadata.Path, metadataStoragePrefix())
+	}
+	return metadata
 }
 
 func MetadataMatchesQuery(metadata ImageMetadata, storedName, query string) bool {
@@ -137,11 +190,11 @@ func saveImageMetadata(metadata ImageMetadata) error {
 }
 
 func loadImageMetadataMonthLocked(month string) (map[string]ImageMetadata, error) {
-	if !isSafeMetadataMonth(month) {
-		return nil, fmt.Errorf("invalid metadata month")
+	metadataPath, err := safeImageMetadataMonthPath(month)
+	if err != nil {
+		return nil, err
 	}
-	path := imageMetadataMonthPath(month)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(metadataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]ImageMetadata{}, nil
@@ -159,15 +212,15 @@ func loadImageMetadataMonthLocked(month string) (map[string]ImageMetadata, error
 }
 
 func writeImageMetadataMonthLocked(month string, items map[string]ImageMetadata) error {
-	if !isSafeMetadataMonth(month) {
-		return fmt.Errorf("invalid metadata month")
-	}
-	if err := os.MkdirAll(imageMetadataDir, 0755); err != nil {
+	metadataPath, err := safeImageMetadataMonthPath(month)
+	if err != nil {
 		return err
 	}
-	path := imageMetadataMonthPath(month)
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0755); err != nil {
+		return err
+	}
 	if len(items) == 0 {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(metadataPath); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		return nil
@@ -176,11 +229,37 @@ func writeImageMetadataMonthLocked(month string, items map[string]ImageMetadata)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(metadataPath, data, 0644)
 }
 
-func imageMetadataMonthPath(month string) string {
-	return filepath.Join(imageMetadataDir, month+".json")
+func safeImageMetadataMonthPath(month string) (string, error) {
+	if !isSafeMetadataMonth(month) {
+		return "", fmt.Errorf("invalid metadata month")
+	}
+	year, err := strconv.Atoi(month[:4])
+	if err != nil {
+		return "", fmt.Errorf("invalid metadata month")
+	}
+	monthNumber, err := strconv.Atoi(month[5:])
+	if err != nil || monthNumber < 1 || monthNumber > 12 {
+		return "", fmt.Errorf("invalid metadata month")
+	}
+
+	baseDir, err := filepath.Abs(imageMetadataDir)
+	if err != nil {
+		return "", err
+	}
+	fileName := fmt.Sprintf("%04d-%02d.json", year, monthNumber)
+	targetPath := filepath.Join(baseDir, fileName)
+	relPath, err := filepath.Rel(baseDir, targetPath)
+	if err != nil {
+		return "", err
+	}
+	if relPath != fileName || filepath.IsAbs(relPath) {
+		return "", fmt.Errorf("invalid metadata path")
+	}
+
+	return filepath.Join(baseDir, relPath), nil
 }
 
 func metadataMonthFromPath(relativePath string) string {
@@ -195,10 +274,10 @@ func metadataMonthFromPath(relativePath string) string {
 
 func metadataMonthFromDatePath(datePath string) string {
 	parts := strings.Split(strings.Trim(datePath, "/"), "/")
-	if len(parts) >= 2 && len(parts[0]) == 4 && len(parts[1]) == 2 {
+	if len(parts) >= 2 && len(parts[0]) == 4 && len(parts[1]) == 2 && isDigits(parts[0]) && isDigits(parts[1]) {
 		return parts[0] + "-" + parts[1]
 	}
-	return time.Now().Format("2006-01")
+	return ""
 }
 
 func isSafeMetadataMonth(month string) bool {

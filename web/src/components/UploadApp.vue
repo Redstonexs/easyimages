@@ -35,6 +35,7 @@ const uploadedTotal = ref(0)
 const totalSize = ref(0)
 const activeFileIndex = ref(0)
 const notices = ref<Notice[]>([])
+const selectedStorageSource = ref(props.bootstrap.config.default_storage_source || props.bootstrap.config.storage_sources[0]?.id || 'local')
 
 const showLogin = ref(false)
 const loginUser = ref('')
@@ -189,6 +190,7 @@ function uploadFileWhole(
   return new Promise((resolve, reject) => {
     const formData = new FormData()
     formData.append('file', file)
+    formData.append('storage_source', selectedStorageSource.value)
     const xhr = new XMLHttpRequest()
     xhr.upload.addEventListener('progress', event => {
       if (!event.lengthComputable) return
@@ -235,6 +237,7 @@ async function uploadFileChunked(
         formData.append('chunkIndex', chunkIndex.toString())
         formData.append('totalChunks', totalChunks.toString())
         formData.append('filename', file.name)
+        formData.append('storage_source', selectedStorageSource.value)
 
         try {
           await sendChunk(formData, loaded => {
@@ -264,6 +267,7 @@ async function uploadFileChunked(
   } catch (error) {
     const cleanup = new FormData()
     cleanup.append('uploadId', uploadId)
+    cleanup.append('storage_source', selectedStorageSource.value)
     navigator.sendBeacon?.('/app/upload/chunk/cleanup', cleanup)
     throw error
   }
@@ -273,6 +277,7 @@ async function uploadFileChunked(
   mergeData.append('totalChunks', totalChunks.toString())
   mergeData.append('filename', file.name)
   mergeData.append('merge', 'true')
+  mergeData.append('storage_source', selectedStorageSource.value)
   onProgress(file.size)
   onProcessing('文件已传完，服务器合并处理中...')
   return await sendChunk(mergeData, () => undefined, '分片合并失败')
@@ -452,6 +457,16 @@ onMounted(() => {
       </button>
     </section>
 
+    <section v-if="bootstrap.config.storage_sources.length > 1" class="storage-source-panel">
+      <label for="storage-source">存储位置</label>
+      <select id="storage-source" v-model="selectedStorageSource" class="form-control" :disabled="isUploading">
+        <option v-for="source in bootstrap.config.storage_sources" :key="source.id" :value="source.id">
+          {{ source.name }} ({{ source.type === 's3' ? 'S3' : '本地' }})
+        </option>
+      </select>
+      <p class="text-muted">选择 S3 源时，文件会直接写入对应存储桶，不保存本地原图。</p>
+    </section>
+
     <section v-if="progressItems.length" class="upload-progress-container active" aria-live="polite">
       <div class="file-progress-list">
         <article v-for="item in progressItems" :key="item.id" class="file-progress-item">
@@ -585,6 +600,9 @@ onMounted(() => {
 }
 
 .upload-btn { margin-top: 18px; }
+
+.storage-source-panel { margin: 16px 0; padding: 14px; border: 1px solid #e8eef6; border-radius: 12px; background: #fff; }
+.storage-source-panel label { display: block; margin-bottom: 6px; font-weight: 700; }
 
 .upload-progress-container { margin-top: 20px; }
 

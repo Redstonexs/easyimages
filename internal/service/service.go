@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"easyimage/config"
+	"easyimage/internal/storage"
 
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
@@ -661,6 +663,21 @@ func FormatSize(bytes int64) string {
 func DeleteFile(path string) error {
 	cfg := config.Get()
 	cleanedPath := strings.TrimPrefix(path, cfg.Domain)
+	if metadata, ok := GetImageMetadata(cleanedPath); ok && metadata.StorageType == "s3" {
+		source, sourceOK := cfg.StorageSourceByID(metadata.StorageSource)
+		if !sourceOK || source.Type != "s3" {
+			return fmt.Errorf("storage source not found")
+		}
+		store, err := storage.NewS3Store(context.Background(), source)
+		if err != nil {
+			return err
+		}
+		if err := store.Delete(context.Background(), metadata.ObjectKey); err != nil {
+			return err
+		}
+		DeleteImageMetadata(cleanedPath)
+		return nil
+	}
 
 	// 验证并获取安全路径
 	safePath, err := getSafePath(cleanedPath)
@@ -748,6 +765,29 @@ func DeleteDirectory(path string) error {
 
 // GetImageInfo 获取图片信息
 func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error) {
+	if metadata, ok := GetImageMetadata(img); ok && metadata.StorageType == "s3" {
+		url := metadata.URL
+		if url == "" {
+			if source, sourceOK := cfg.StorageSourceByID(metadata.StorageSource); sourceOK {
+				url = storage.PublicURL(source, metadata.ObjectKey)
+			}
+		}
+		displayName := metadata.OriginalName
+		if displayName == "" {
+			displayName = metadata.StoredName
+		}
+		return map[string]interface{}{
+			"name":         metadata.StoredName,
+			"storedName":   metadata.StoredName,
+			"originalName": metadata.OriginalName,
+			"displayName":  displayName,
+			"path":         img,
+			"size":         FormatSize(metadata.Size),
+			"modTime":      metadata.UploadedAt,
+			"url":          url,
+		}, nil
+	}
+
 	// 验证并获取安全路径
 	safePath, err := getSafePathWithConfig(img, cfg)
 	if err != nil {
@@ -845,8 +885,13 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 
 // ValidateURLPath 验证 URL 路径参数的安全性。
 // 必须在使用用户提供的路径参数前调用（Download、Filer、ImageURLList 等 handler）。
-// filepath.Clean 规范化路径（处理 Windows 反斜杠、多余的 / 和 .），防止 "..\" 绕过。
+// path.Clean 规范化 URL 路径，原始路径段检查防止 "..\" 绕过。
 func ValidateURLPath(pathStr, requiredPrefix string) (string, error) {
+	for _, part := range strings.Split(strings.ReplaceAll(pathStr, "\\", "/"), "/") {
+		if part == ".." {
+			return "", fmt.Errorf("invalid path: contains path traversal")
+		}
+	}
 	// Use path.Clean (not filepath.Clean) for URL paths — filepath.Clean
 	// converts "/" to "\" on Windows, breaking the prefix check below.
 	cleaned := path.Clean(pathStr)

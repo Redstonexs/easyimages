@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import type { AdminConfig, AdminOverview } from '../../types'
 import type { NoticeType } from '../../shared/notify'
 import { adminApi } from '../../shared/adminApi'
@@ -9,8 +9,13 @@ const emit = defineEmits<{ notice: [message: string, type?: NoticeType] }>()
 const loading = ref(true)
 const saving = ref(false)
 const converting = ref(false)
+const uploadingIcon = ref(false)
 const overview = ref<AdminOverview | null>(null)
 const config = ref<AdminConfig | null>(null)
+const siteIconInput = ref<HTMLInputElement | null>(null)
+const storageSourcesJSON = ref('')
+
+const storageSourceOptions = computed(() => config.value?.storage_sources.filter(source => source.enabled) || [])
 
 async function load() {
   loading.value = true
@@ -18,6 +23,7 @@ async function load() {
     const data = await adminApi.overview()
     overview.value = data
     config.value = data.config
+    storageSourcesJSON.value = JSON.stringify(data.config.storage_sources, null, 2)
   } catch (error) {
     emit('notice', error instanceof Error ? error.message : '加载配置失败', 'danger')
   } finally {
@@ -27,10 +33,17 @@ async function load() {
 
 async function save() {
   if (!config.value) return
+  try {
+    config.value.storage_sources = JSON.parse(storageSourcesJSON.value)
+  } catch {
+    emit('notice', '存储源 JSON 格式错误', 'danger')
+    return
+  }
   saving.value = true
   try {
     const result = await adminApi.saveConfig(config.value)
     config.value = result.config
+    storageSourcesJSON.value = JSON.stringify(result.config.storage_sources, null, 2)
     emit('notice', result.msg || '保存成功', 'success')
   } catch (error) {
     emit('notice', error instanceof Error ? error.message : '保存失败', 'danger')
@@ -48,6 +61,29 @@ async function batchWebP() {
     emit('notice', error instanceof Error ? error.message : '转换失败', 'danger')
   } finally {
     converting.value = false
+  }
+}
+
+async function uploadSiteIcon() {
+  if (!config.value) return
+  const file = siteIconInput.value?.files?.[0]
+  if (!file) {
+    emit('notice', '请选择图标文件', 'warning')
+    return
+  }
+
+  const formData = new FormData()
+  formData.append('icon', file)
+  uploadingIcon.value = true
+  try {
+    const result = await adminApi.uploadSiteIcon(formData)
+    config.value.site_icon = result.site_icon
+    if (siteIconInput.value) siteIconInput.value.value = ''
+    emit('notice', result.message || '图标已更新', 'success')
+  } catch (error) {
+    emit('notice', error instanceof Error ? error.message : '上传图标失败', 'danger')
+  } finally {
+    uploadingIcon.value = false
   }
 }
 
@@ -73,9 +109,21 @@ onMounted(load)
           <div class="form-section">
             <h4>站点</h4>
             <div class="form-row">
-              <label>站点标题<input v-model="config.title" class="form-control"></label>
+              <label>网站名称<input v-model="config.title" class="form-control"></label>
               <label>域名<input v-model="config.domain" class="form-control"></label>
               <label>图片域名<input v-model="config.imgurl" class="form-control"></label>
+            </div>
+            <div class="site-icon-editor">
+              <div class="site-icon-preview">
+                <img :src="config.site_icon" alt="当前网站图标">
+              </div>
+              <div class="site-icon-fields">
+                <label>网站图标<input ref="siteIconInput" type="file" class="form-control" accept=".ico,.png,.svg,image/x-icon,image/png,image/svg+xml"></label>
+                <p class="help-block">支持 ICO、PNG、SVG，文件大小不超过 512KB。上传后会自动刷新浏览器图标缓存。</p>
+                <button type="button" class="btn btn-default" :disabled="uploadingIcon" @click="uploadSiteIcon">
+                  <i class="icon" :class="uploadingIcon ? 'icon-spin icon-spinner' : 'icon-upload'"></i> {{ uploadingIcon ? '上传中...' : '上传图标' }}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -84,7 +132,7 @@ onMounted(load)
             <div class="form-row">
               <label>最大上传大小<input v-model.number="config.maxSize" type="number" class="form-control"></label>
               <label>允许扩展名<input v-model="config.extensions" class="form-control"></label>
-              <label>登录上传<select v-model.number="config.mustLogin" class="form-control"><option :value="0">关闭</option><option :value="1">开启</option></select></label>
+              <label>私有模式<select v-model.number="config.mustLogin" class="form-control"><option :value="1">开启：仅登录用户可上传</option><option :value="0">关闭：允许访客上传</option></select></label>
               <label>图片质量<input v-model.number="config.compress_ratio" type="number" min="1" max="100" class="form-control"></label>
             </div>
           </div>
@@ -138,6 +186,17 @@ onMounted(load)
             </div>
           </div>
 
+          <div class="form-section">
+            <h4>存储源</h4>
+            <div class="form-row">
+              <label>默认上传源<select v-model="config.default_storage_source" class="form-control">
+                <option v-for="source in storageSourceOptions" :key="source.id" :value="source.id">{{ source.name }} ({{ source.type }})</option>
+              </select></label>
+            </div>
+            <label>存储源 JSON<textarea v-model="storageSourcesJSON" class="form-control monospace" rows="12"></textarea></label>
+            <p class="help-block">本地源 ID 必须保留为 local。S3 源 type 为 s3；密钥留空时会保留原密钥，不会在接口中回显。</p>
+          </div>
+
           <button type="submit" class="btn btn-primary" :disabled="saving"><i class="icon icon-save"></i> {{ saving ? '保存中...' : '保存配置' }}</button>
         </form>
       </div>
@@ -152,5 +211,12 @@ onMounted(load)
 .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
 label { font-weight: 500; }
 label .form-control, label textarea { margin-top: 6px; font-weight: 400; }
+.site-icon-editor { display: flex; gap: 14px; align-items: center; margin-top: 14px; padding: 12px; border: 1px solid #edf2f7; border-radius: 10px; background: #f8fafc; }
+.site-icon-preview { display: grid; flex: 0 0 58px; width: 58px; height: 58px; place-items: center; border: 1px solid #dbe3ef; border-radius: 14px; background: #fff; }
+.site-icon-preview img { max-width: 36px; max-height: 36px; object-fit: contain; }
+.site-icon-fields { flex: 1; min-width: 0; }
+.site-icon-fields .help-block { margin: 6px 0 8px; }
+.monospace { font-family: Consolas, Monaco, monospace; font-size: 12px; }
 @media (max-width: 900px) { .admin-config-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .site-icon-editor { align-items: stretch; flex-direction: column; } }
 </style>
