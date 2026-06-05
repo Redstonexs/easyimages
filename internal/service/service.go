@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"easyimage/config"
+	"easyimage/internal/storage"
 
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
@@ -661,6 +663,21 @@ func FormatSize(bytes int64) string {
 func DeleteFile(path string) error {
 	cfg := config.Get()
 	cleanedPath := strings.TrimPrefix(path, cfg.Domain)
+	if metadata, ok := GetImageMetadata(cleanedPath); ok && metadata.StorageType == "s3" {
+		source, sourceOK := cfg.StorageSourceByID(metadata.StorageSource)
+		if !sourceOK || source.Type != "s3" {
+			return fmt.Errorf("storage source not found")
+		}
+		store, err := storage.NewS3Store(context.Background(), source)
+		if err != nil {
+			return err
+		}
+		if err := store.Delete(context.Background(), metadata.ObjectKey); err != nil {
+			return err
+		}
+		DeleteImageMetadata(cleanedPath)
+		return nil
+	}
 
 	// 验证并获取安全路径
 	safePath, err := getSafePath(cleanedPath)
@@ -748,6 +765,29 @@ func DeleteDirectory(path string) error {
 
 // GetImageInfo 获取图片信息
 func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error) {
+	if metadata, ok := GetImageMetadata(img); ok && metadata.StorageType == "s3" {
+		url := metadata.URL
+		if url == "" {
+			if source, sourceOK := cfg.StorageSourceByID(metadata.StorageSource); sourceOK {
+				url = storage.PublicURL(source, metadata.ObjectKey)
+			}
+		}
+		displayName := metadata.OriginalName
+		if displayName == "" {
+			displayName = metadata.StoredName
+		}
+		return map[string]interface{}{
+			"name":         metadata.StoredName,
+			"storedName":   metadata.StoredName,
+			"originalName": metadata.OriginalName,
+			"displayName":  displayName,
+			"path":         img,
+			"size":         FormatSize(metadata.Size),
+			"modTime":      metadata.UploadedAt,
+			"url":          url,
+		}, nil
+	}
+
 	// 验证并获取安全路径
 	safePath, err := getSafePathWithConfig(img, cfg)
 	if err != nil {

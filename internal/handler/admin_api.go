@@ -28,38 +28,56 @@ var allowedSiteIconExts = map[string]string{
 }
 
 type adminConfigPayload struct {
-	Title              string `json:"title"`
-	SiteIcon           string `json:"site_icon"`
-	Domain             string `json:"domain"`
-	ImageURL           string `json:"imgurl"`
-	MaxSize            int64  `json:"maxSize"`
-	Extensions         string `json:"extensions"`
-	MustLogin          int    `json:"mustLogin"`
-	CompressRatio      int    `json:"compress_ratio"`
-	Thumbnail          int    `json:"thumbnail"`
-	ThumbnailW         int    `json:"thumbnail_w"`
-	ThumbnailH         int    `json:"thumbnail_h"`
-	WebpConvert        int    `json:"webp_convert"`
-	WebpQuality        int    `json:"webp_quality"`
-	Watermark          int    `json:"watermark"`
-	WaterText          string `json:"waterText"`
-	WaterPosition      int    `json:"waterPosition"`
-	TextColor          string `json:"textColor"`
-	TextSize           int    `json:"textSize"`
-	TextFont           string `json:"textFont"`
-	WaterImg           string `json:"waterImg"`
-	Captcha            int    `json:"captcha"`
-	CaptchaType        int    `json:"captcha_type"`
-	TurnstileSiteKey   string `json:"turnstile_site_key"`
-	RecaptchaSiteKey   string `json:"recaptcha_site_key"`
-	HotlinkProtect     int    `json:"hotlink_protect"`
-	HotlinkDomains     string `json:"hotlink_domains"`
-	Mime               string `json:"mime"`
-	StoragePath        string `json:"storage_path"`
-	TimeFormat         string `json:"time_format"`
-	AutoDelete         int    `json:"auto_delete"`
-	TurnstileSecretSet bool   `json:"turnstile_secret_set"`
-	RecaptchaSecretSet bool   `json:"recaptcha_secret_set"`
+	Title                string                      `json:"title"`
+	SiteIcon             string                      `json:"site_icon"`
+	Domain               string                      `json:"domain"`
+	ImageURL             string                      `json:"imgurl"`
+	MaxSize              int64                       `json:"maxSize"`
+	Extensions           string                      `json:"extensions"`
+	MustLogin            int                         `json:"mustLogin"`
+	CompressRatio        int                         `json:"compress_ratio"`
+	Thumbnail            int                         `json:"thumbnail"`
+	ThumbnailW           int                         `json:"thumbnail_w"`
+	ThumbnailH           int                         `json:"thumbnail_h"`
+	WebpConvert          int                         `json:"webp_convert"`
+	WebpQuality          int                         `json:"webp_quality"`
+	Watermark            int                         `json:"watermark"`
+	WaterText            string                      `json:"waterText"`
+	WaterPosition        int                         `json:"waterPosition"`
+	TextColor            string                      `json:"textColor"`
+	TextSize             int                         `json:"textSize"`
+	TextFont             string                      `json:"textFont"`
+	WaterImg             string                      `json:"waterImg"`
+	Captcha              int                         `json:"captcha"`
+	CaptchaType          int                         `json:"captcha_type"`
+	TurnstileSiteKey     string                      `json:"turnstile_site_key"`
+	RecaptchaSiteKey     string                      `json:"recaptcha_site_key"`
+	HotlinkProtect       int                         `json:"hotlink_protect"`
+	HotlinkDomains       string                      `json:"hotlink_domains"`
+	Mime                 string                      `json:"mime"`
+	StoragePath          string                      `json:"storage_path"`
+	TimeFormat           string                      `json:"time_format"`
+	AutoDelete           int                         `json:"auto_delete"`
+	DefaultStorageSource string                      `json:"default_storage_source"`
+	StorageSources       []adminStorageSourcePayload `json:"storage_sources"`
+	TurnstileSecretSet   bool                        `json:"turnstile_secret_set"`
+	RecaptchaSecretSet   bool                        `json:"recaptcha_secret_set"`
+}
+
+type adminStorageSourcePayload struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Type              string `json:"type"`
+	Enabled           bool   `json:"enabled"`
+	PublicBaseURL     string `json:"public_base_url"`
+	S3Endpoint        string `json:"s3_endpoint"`
+	S3Region          string `json:"s3_region"`
+	S3Bucket          string `json:"s3_bucket"`
+	S3Prefix          string `json:"s3_prefix"`
+	S3AccessKeyID     string `json:"s3_access_key_id"`
+	S3AccessKeySecret string `json:"s3_access_key_secret,omitempty"`
+	S3ForcePathStyle  bool   `json:"s3_force_path_style"`
+	S3SecretSet       bool   `json:"s3_secret_set"`
 }
 
 type adminOverviewPayload struct {
@@ -323,38 +341,40 @@ func AdminDeleteAPI(cfg *config.Config) gin.HandlerFunc {
 
 func adminConfigFromConfig(cfg *config.Config) adminConfigPayload {
 	return adminConfigPayload{
-		Title:              cfg.Title,
-		SiteIcon:           cfg.SiteIcon,
-		Domain:             cfg.Domain,
-		ImageURL:           cfg.ImageURL,
-		MaxSize:            cfg.MaxSize,
-		Extensions:         cfg.Extensions,
-		MustLogin:          cfg.MustLogin,
-		CompressRatio:      cfg.CompressRatio,
-		Thumbnail:          cfg.Thumbnail,
-		ThumbnailW:         cfg.ThumbnailW,
-		ThumbnailH:         cfg.ThumbnailH,
-		WebpConvert:        cfg.WebpConvert,
-		WebpQuality:        cfg.WebpQuality,
-		Watermark:          cfg.Watermark,
-		WaterText:          cfg.WaterText,
-		WaterPosition:      cfg.WaterPosition,
-		TextColor:          cfg.TextColor,
-		TextSize:           cfg.TextSize,
-		TextFont:           cfg.TextFont,
-		WaterImg:           cfg.WaterImg,
-		Captcha:            cfg.Captcha,
-		CaptchaType:        cfg.CaptchaType,
-		TurnstileSiteKey:   cfg.TurnstileSiteKey,
-		RecaptchaSiteKey:   cfg.RecaptchaSiteKey,
-		HotlinkProtect:     cfg.HotlinkProtect,
-		HotlinkDomains:     cfg.HotlinkDomains,
-		Mime:               cfg.Mime,
-		StoragePath:        cfg.StoragePath,
-		TimeFormat:         cfg.TimeFormat,
-		AutoDelete:         cfg.AutoDelete,
-		TurnstileSecretSet: cfg.TurnstileSecretKey != "",
-		RecaptchaSecretSet: cfg.RecaptchaSecretKey != "",
+		Title:                cfg.Title,
+		SiteIcon:             cfg.SiteIcon,
+		Domain:               cfg.Domain,
+		ImageURL:             cfg.ImageURL,
+		MaxSize:              cfg.MaxSize,
+		Extensions:           cfg.Extensions,
+		MustLogin:            cfg.MustLogin,
+		CompressRatio:        cfg.CompressRatio,
+		Thumbnail:            cfg.Thumbnail,
+		ThumbnailW:           cfg.ThumbnailW,
+		ThumbnailH:           cfg.ThumbnailH,
+		WebpConvert:          cfg.WebpConvert,
+		WebpQuality:          cfg.WebpQuality,
+		Watermark:            cfg.Watermark,
+		WaterText:            cfg.WaterText,
+		WaterPosition:        cfg.WaterPosition,
+		TextColor:            cfg.TextColor,
+		TextSize:             cfg.TextSize,
+		TextFont:             cfg.TextFont,
+		WaterImg:             cfg.WaterImg,
+		Captcha:              cfg.Captcha,
+		CaptchaType:          cfg.CaptchaType,
+		TurnstileSiteKey:     cfg.TurnstileSiteKey,
+		RecaptchaSiteKey:     cfg.RecaptchaSiteKey,
+		HotlinkProtect:       cfg.HotlinkProtect,
+		HotlinkDomains:       cfg.HotlinkDomains,
+		Mime:                 cfg.Mime,
+		StoragePath:          cfg.StoragePath,
+		TimeFormat:           cfg.TimeFormat,
+		AutoDelete:           cfg.AutoDelete,
+		DefaultStorageSource: cfg.DefaultStorageSource,
+		StorageSources:       adminStorageSourcesFromConfig(cfg),
+		TurnstileSecretSet:   cfg.TurnstileSecretKey != "",
+		RecaptchaSecretSet:   cfg.RecaptchaSecretKey != "",
 	}
 }
 
@@ -420,6 +440,12 @@ func applyAdminConfigPayload(cfg *config.Config, req adminConfigPayload) {
 	if req.TimeFormat != "" {
 		cfg.TimeFormat = req.TimeFormat
 	}
+	if req.DefaultStorageSource != "" {
+		cfg.DefaultStorageSource = req.DefaultStorageSource
+	}
+	if len(req.StorageSources) > 0 {
+		cfg.StorageSources = mergeAdminStorageSources(cfg.StorageSources, req.StorageSources)
+	}
 
 	cfg.MustLogin = req.MustLogin
 	cfg.Thumbnail = req.Thumbnail
@@ -431,6 +457,42 @@ func applyAdminConfigPayload(cfg *config.Config, req adminConfigPayload) {
 	cfg.HotlinkProtect = req.HotlinkProtect
 	cfg.HotlinkDomains = req.HotlinkDomains
 	cfg.AutoDelete = req.AutoDelete
+}
+
+func adminStorageSourcesFromConfig(cfg *config.Config) []adminStorageSourcePayload {
+	sources := make([]adminStorageSourcePayload, 0, len(cfg.StorageSources))
+	for _, source := range cfg.StorageSources {
+		sources = append(sources, adminStorageSourcePayload{
+			ID: source.ID, Name: source.Name, Type: source.Type, Enabled: source.Enabled,
+			PublicBaseURL: source.PublicBaseURL, S3Endpoint: source.S3Endpoint, S3Region: source.S3Region,
+			S3Bucket: source.S3Bucket, S3Prefix: source.S3Prefix, S3AccessKeyID: source.S3AccessKeyID,
+			S3ForcePathStyle: source.S3ForcePathStyle, S3SecretSet: source.S3AccessKeySecret != "",
+		})
+	}
+	return sources
+}
+
+func mergeAdminStorageSources(existing []config.StorageSourceConfig, payloads []adminStorageSourcePayload) []config.StorageSourceConfig {
+	secretByID := make(map[string]string, len(existing))
+	for _, source := range existing {
+		secretByID[source.ID] = source.S3AccessKeySecret
+	}
+	sources := make([]config.StorageSourceConfig, 0, len(payloads))
+	for _, item := range payloads {
+		if item.ID == "" || item.Type == "" {
+			continue
+		}
+		secret := item.S3AccessKeySecret
+		if secret == "" {
+			secret = secretByID[item.ID]
+		}
+		sources = append(sources, config.StorageSourceConfig{
+			ID: item.ID, Name: item.Name, Type: item.Type, Enabled: item.Enabled, PublicBaseURL: item.PublicBaseURL,
+			S3Endpoint: item.S3Endpoint, S3Region: item.S3Region, S3Bucket: item.S3Bucket, S3Prefix: item.S3Prefix,
+			S3AccessKeyID: item.S3AccessKeyID, S3AccessKeySecret: secret, S3ForcePathStyle: item.S3ForcePathStyle,
+		})
+	}
+	return sources
 }
 
 func adminChartPayloadFromConfig(cfg *config.Config) adminChartPayload {
@@ -472,19 +534,24 @@ func adminURLListPayload(c *gin.Context, cfg *config.Config) (adminURLListData, 
 	}
 
 	rawFiles := service.GetFileListRecursive("." + reqPath)
-	allFiles := make([]string, 0, len(rawFiles))
+	allFiles := make([]adminFileEntry, 0, len(rawFiles))
+	seen := make(map[string]bool, len(rawFiles))
 	for _, name := range rawFiles {
 		if strings.HasPrefix(name, "webp/") || !service.IsImageFile(name) {
 			continue
 		}
+		relativePath := reqPath + name
 		if query != "" {
-			relativePath := reqPath + name
 			metadata, _ := service.GetImageMetadata(relativePath)
 			if !adminFileMatchesQuery(name, relativePath, metadata, query) {
 				continue
 			}
 		}
-		allFiles = append(allFiles, name)
+		seen[relativePath] = true
+		allFiles = append(allFiles, adminFileEntries(reqPath, []string{name}, cfg)...)
+	}
+	if reqPath == cfg.Path {
+		allFiles = append(allFiles, adminURLListMetadataEntries(cfg, query, seen)...)
 	}
 
 	total := len(allFiles)
@@ -505,8 +572,33 @@ func adminURLListPayload(c *gin.Context, cfg *config.Config) (adminURLListData, 
 		PageSize:   pageSize,
 		Total:      total,
 		TotalPages: totalPages,
-		Files:      adminFileEntries(reqPath, allFiles[start:end], cfg),
+		Files:      allFiles[start:end],
 	}, nil
+}
+
+func adminURLListMetadataEntries(cfg *config.Config, query string, seen map[string]bool) []adminFileEntry {
+	allFiles := make([]adminFileEntry, 0)
+	for i := 0; i < cfg.ListDate; i++ {
+		datePath := time.Now().AddDate(0, 0, -i).Format("2006/01/02/")
+		for _, metadata := range service.ListImageMetadataForDate(datePath, cfg.ShowSort == 1) {
+			if metadata.StorageType != "s3" || seen[metadata.Path] {
+				continue
+			}
+			if query != "" && !adminFileMatchesQuery(metadata.StoredName, metadata.Path, metadata, query) {
+				continue
+			}
+			name := metadata.StoredName
+			if name == "" {
+				name = filepath.Base(metadata.Path)
+			}
+			allFiles = append(allFiles, adminFileEntry{
+				Name: name, OriginalName: metadata.OriginalName, Path: metadata.Path,
+				URL: imageURLForMetadata(cfg, metadata.Path, metadata), ThumbURL: thumbURLForMetadata(metadata.Path, metadata),
+				Ext: strings.TrimPrefix(strings.ToUpper(filepath.Ext(name)), "."), Size: metadata.Size, SizeHuman: service.FormatSize(metadata.Size), ModifiedAt: metadata.UploadedAt,
+			})
+		}
+	}
+	return allFiles
 }
 
 func adminFileMatchesQuery(name, relativePath string, metadata service.ImageMetadata, query string) bool {
@@ -577,8 +669,8 @@ func adminFileEntries(basePath string, names []string, cfg *config.Config) []adm
 			Name:         name,
 			OriginalName: metadata.OriginalName,
 			Path:         relativePath,
-			URL:          cfg.Domain + relativePath,
-			ThumbURL:     "/app/thumb?img=" + relativePath,
+			URL:          imageURLForMetadata(cfg, relativePath, metadata),
+			ThumbURL:     thumbURLForMetadata(relativePath, metadata),
 			WebPURL:      service.GetWebPURL(relativePath, cfg),
 			Ext:          ext,
 			Size:         size,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import type { AdminConfig, AdminOverview } from '../../types'
 import type { NoticeType } from '../../shared/notify'
 import { adminApi } from '../../shared/adminApi'
@@ -13,6 +13,9 @@ const uploadingIcon = ref(false)
 const overview = ref<AdminOverview | null>(null)
 const config = ref<AdminConfig | null>(null)
 const siteIconInput = ref<HTMLInputElement | null>(null)
+const storageSourcesJSON = ref('')
+
+const storageSourceOptions = computed(() => config.value?.storage_sources.filter(source => source.enabled) || [])
 
 async function load() {
   loading.value = true
@@ -20,6 +23,7 @@ async function load() {
     const data = await adminApi.overview()
     overview.value = data
     config.value = data.config
+    storageSourcesJSON.value = JSON.stringify(data.config.storage_sources, null, 2)
   } catch (error) {
     emit('notice', error instanceof Error ? error.message : '加载配置失败', 'danger')
   } finally {
@@ -29,10 +33,17 @@ async function load() {
 
 async function save() {
   if (!config.value) return
+  try {
+    config.value.storage_sources = JSON.parse(storageSourcesJSON.value)
+  } catch {
+    emit('notice', '存储源 JSON 格式错误', 'danger')
+    return
+  }
   saving.value = true
   try {
     const result = await adminApi.saveConfig(config.value)
     config.value = result.config
+    storageSourcesJSON.value = JSON.stringify(result.config.storage_sources, null, 2)
     emit('notice', result.msg || '保存成功', 'success')
   } catch (error) {
     emit('notice', error instanceof Error ? error.message : '保存失败', 'danger')
@@ -175,6 +186,17 @@ onMounted(load)
             </div>
           </div>
 
+          <div class="form-section">
+            <h4>存储源</h4>
+            <div class="form-row">
+              <label>默认上传源<select v-model="config.default_storage_source" class="form-control">
+                <option v-for="source in storageSourceOptions" :key="source.id" :value="source.id">{{ source.name }} ({{ source.type }})</option>
+              </select></label>
+            </div>
+            <label>存储源 JSON<textarea v-model="storageSourcesJSON" class="form-control monospace" rows="12"></textarea></label>
+            <p class="help-block">本地源 ID 必须保留为 local。S3 源 type 为 s3；密钥留空时会保留原密钥，不会在接口中回显。</p>
+          </div>
+
           <button type="submit" class="btn btn-primary" :disabled="saving"><i class="icon icon-save"></i> {{ saving ? '保存中...' : '保存配置' }}</button>
         </form>
       </div>
@@ -194,6 +216,7 @@ label .form-control, label textarea { margin-top: 6px; font-weight: 400; }
 .site-icon-preview img { max-width: 36px; max-height: 36px; object-fit: contain; }
 .site-icon-fields { flex: 1; min-width: 0; }
 .site-icon-fields .help-block { margin: 6px 0 8px; }
+.monospace { font-family: Consolas, Monaco, monospace; font-size: 12px; }
 @media (max-width: 900px) { .admin-config-grid { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .site-icon-editor { align-items: stretch; flex-direction: column; } }
 </style>

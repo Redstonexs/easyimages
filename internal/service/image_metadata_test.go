@@ -74,6 +74,31 @@ func TestSaveImageMetadataRejectsTraversalPath(t *testing.T) {
 	}
 }
 
+func TestSaveImageMetadataWithStoragePersistsS3Fields(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+
+	SaveImageMetadataWithStorage("/i/2026/06/05/photo.jpg", "photo.jpg", 42, "web", time.Date(2026, 6, 5, 1, 2, 3, 0, time.UTC), "s3-main", "s3", "uploads/2026/06/05/photo.jpg", "https://cdn.example.com/uploads/2026/06/05/photo.jpg", "https://cdn.example.com/uploads/2026/06/05/photo.jpg")
+	metadata, ok := GetImageMetadata("/i/2026/06/05/photo.jpg")
+	if !ok {
+		t.Fatal("metadata not found")
+	}
+	if metadata.StorageSource != "s3-main" || metadata.StorageType != "s3" || metadata.ObjectKey != "uploads/2026/06/05/photo.jpg" {
+		t.Fatalf("metadata storage fields = %+v", metadata)
+	}
+}
+
 func TestLoadImageMetadataForDateRejectsTraversalPath(t *testing.T) {
 	tmp := t.TempDir()
 	oldWd, err := os.Getwd()

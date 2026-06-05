@@ -10,3 +10,16 @@ func TestSetDefaultsSetsSiteIcon(t *testing.T) {
 		t.Fatalf("SiteIcon = %q, want /favicon.ico", cfg.SiteIcon)
 	}
 }
+
+func TestSetDefaultsAddsLocalStorageSource(t *testing.T) {
+	cfg := &Config{}
+	setDefaults(cfg)
+
+	if cfg.DefaultStorageSource != "local" {
+		t.Fatalf("DefaultStorageSource = %q", cfg.DefaultStorageSource)
+	}
+	source, ok := cfg.StorageSourceByID("")
+	if !ok || source.ID != "local" || source.Type != "local" {
+		t.Fatalf("default source = %+v, ok=%v", source, ok)
+	}
+}

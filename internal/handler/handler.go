@@ -3,6 +3,7 @@ package handler
 import (
 	"easyimage/config"
 	"easyimage/internal/service"
+	"easyimage/internal/storage"
 	"fmt"
 	"io"
 	"log"
@@ -24,10 +25,12 @@ func Index(cfg *config.Config) gin.HandlerFunc {
 		captchaData := service.GenerateCaptcha(cfg)
 		frontend := gin.H{
 			"config": gin.H{
-				"title":       cfg.Title,
-				"description": cfg.Description,
-				"max_size":    cfg.MaxSize,
-				"api_status":  cfg.APIStatus,
+				"title":                  cfg.Title,
+				"description":            cfg.Description,
+				"max_size":               cfg.MaxSize,
+				"api_status":             cfg.APIStatus,
+				"default_storage_source": defaultPublicStorageSource(cfg),
+				"storage_sources":        publicStorageSources(cfg),
 			},
 			"version":    config.Version,
 			"is_admin":   isAdmin,
@@ -44,6 +47,23 @@ func Index(cfg *config.Config) gin.HandlerFunc {
 		}
 		c.HTML(http.StatusOK, "index.html", data)
 	}
+}
+
+func defaultPublicStorageSource(cfg *config.Config) string {
+	source, _ := cfg.StorageSourceByID(cfg.DefaultStorageSource)
+	if source.ID == "" {
+		return "local"
+	}
+	return source.ID
+}
+
+func publicStorageSources(cfg *config.Config) []gin.H {
+	sources := cfg.EnabledStorageSources()
+	items := make([]gin.H, 0, len(sources))
+	for _, source := range sources {
+		items = append(items, gin.H{"id": source.ID, "name": source.Name, "type": source.Type})
+	}
+	return items
 }
 
 // CaptchaAPI 获取验证码
@@ -253,6 +273,12 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 			}
 		}
 
+		source, _ := cfg.StorageSourceByID(c.PostForm("storage_source"))
+		if source.Type == "s3" {
+			handleS3ChunkUpload(c, cfg, source, uploadId, totalChunks, chunkIndex, isMerge, filename)
+			return
+		}
+
 		chunk, formFileErr := c.FormFile("chunk")
 
 		// 保存分片（如果有实际文件数据）
@@ -438,6 +464,16 @@ func ChunkCleanup(cfg *config.Config) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的上传ID"})
 				return
 			}
+		}
+		if state, err := storage.LoadMultipartState(uploadId); err == nil && state.S3UploadID != "" {
+			if source, ok := cfg.StorageSourceByID(state.SourceID); ok && source.Type == "s3" {
+				if store, err := storage.NewS3Store(c.Request.Context(), source); err == nil {
+					_ = store.AbortMultipart(c.Request.Context(), state.ObjectKey, state.S3UploadID)
+				}
+			}
+			_ = storage.DeleteMultipartState(uploadId)
+			c.JSON(http.StatusOK, gin.H{"result": "success", "code": 200})
+			return
 		}
 
 		chunkDir, pathErr := service.SanitizePath(filepath.Join(".", cfg.Path, "chunks", uploadId))
@@ -660,6 +696,12 @@ func Download(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid parameter"})
 			return
 		}
+		if metadata, ok := service.GetImageMetadata(dw); ok && metadata.StorageType == "s3" {
+			if metadata.URL != "" {
+				c.Redirect(http.StatusFound, metadata.URL)
+				return
+			}
+		}
 
 		// 验证路径安全性（filepath.Clean 规范化后检查 ".."，防止 Windows 反斜杠绕过）
 		cleanPath, err := service.ValidateURLPath(dw, cfg.Path)
@@ -685,6 +727,16 @@ func Thumbnail(cfg *config.Config) gin.HandlerFunc {
 		if img == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid parameter"})
 			return
+		}
+		if metadata, ok := service.GetImageMetadata(img); ok && metadata.StorageType == "s3" {
+			if metadata.ThumbURL != "" {
+				c.Redirect(http.StatusFound, metadata.ThumbURL)
+				return
+			}
+			if metadata.URL != "" {
+				c.Redirect(http.StatusFound, metadata.URL)
+				return
+			}
 		}
 
 		// 生成缩略图

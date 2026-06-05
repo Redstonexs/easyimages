@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,18 +19,27 @@ import (
 const imageMetadataDir = "admin/logs/metadata"
 
 type ImageMetadata struct {
-	Path         string `json:"path"`
-	StoredName   string `json:"stored_name"`
-	OriginalName string `json:"original_name"`
-	OriginalBase string `json:"original_base"`
-	UploadedAt   string `json:"uploaded_at"`
-	Size         int64  `json:"size"`
-	From         string `json:"from"`
+	Path          string `json:"path"`
+	StoredName    string `json:"stored_name"`
+	OriginalName  string `json:"original_name"`
+	OriginalBase  string `json:"original_base"`
+	UploadedAt    string `json:"uploaded_at"`
+	Size          int64  `json:"size"`
+	From          string `json:"from"`
+	StorageSource string `json:"storage_source,omitempty"`
+	StorageType   string `json:"storage_type,omitempty"`
+	ObjectKey     string `json:"object_key,omitempty"`
+	URL           string `json:"url,omitempty"`
+	ThumbURL      string `json:"thumb_url,omitempty"`
 }
 
 var imageMetadataMu sync.Mutex
 
 func SaveImageMetadata(relativePath, originalName string, size int64, from string, uploadedAt time.Time) {
+	SaveImageMetadataWithStorage(relativePath, originalName, size, from, uploadedAt, "local", "local", strings.TrimPrefix(relativePath, metadataStoragePrefix()), "", "")
+}
+
+func SaveImageMetadataWithStorage(relativePath, originalName string, size int64, from string, uploadedAt time.Time, storageSource, storageType, objectKey, url, thumbURL string) {
 	if relativePath == "" || originalName == "" {
 		return
 	}
@@ -40,13 +50,24 @@ func SaveImageMetadata(relativePath, originalName string, size int64, from strin
 	originalName = OriginalUploadName(originalName)
 
 	metadata := ImageMetadata{
-		Path:         relativePath,
-		StoredName:   filepath.Base(relativePath),
-		OriginalName: originalName,
-		OriginalBase: strings.TrimSuffix(originalName, filepath.Ext(originalName)),
-		UploadedAt:   uploadedAt.Format("2006-01-02 15:04:05"),
-		Size:         size,
-		From:         from,
+		Path:          relativePath,
+		StoredName:    filepath.Base(relativePath),
+		OriginalName:  originalName,
+		OriginalBase:  strings.TrimSuffix(originalName, filepath.Ext(originalName)),
+		UploadedAt:    uploadedAt.Format("2006-01-02 15:04:05"),
+		Size:          size,
+		From:          from,
+		StorageSource: storageSource,
+		StorageType:   storageType,
+		ObjectKey:     objectKey,
+		URL:           url,
+		ThumbURL:      thumbURL,
+	}
+	if metadata.StorageSource == "" {
+		metadata.StorageSource = "local"
+	}
+	if metadata.StorageType == "" {
+		metadata.StorageType = "local"
 	}
 	if err := saveImageMetadata(metadata); err != nil {
 		log.Printf("[Metadata] save failed for %s: %v", relativePath, err)
@@ -71,6 +92,9 @@ func GetImageMetadata(relativePath string) (ImageMetadata, bool) {
 		return ImageMetadata{}, false
 	}
 	metadata, ok := items[relativePath]
+	if ok {
+		metadata = normalizeImageMetadata(metadata)
+	}
 	return metadata, ok
 }
 
@@ -107,10 +131,38 @@ func LoadImageMetadataForDate(datePath string) map[string]ImageMetadata {
 	needle := "/" + strings.Trim(datePath, "/") + "/"
 	for path, metadata := range items {
 		if strings.Contains(path, needle) {
-			result[path] = metadata
+			result[path] = normalizeImageMetadata(metadata)
 		}
 	}
 	return result
+}
+
+func ListImageMetadataForDate(datePath string, sortDesc bool) []ImageMetadata {
+	items := LoadImageMetadataForDate(datePath)
+	list := make([]ImageMetadata, 0, len(items))
+	for _, metadata := range items {
+		list = append(list, normalizeImageMetadata(metadata))
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if sortDesc {
+			return list[i].UploadedAt > list[j].UploadedAt
+		}
+		return list[i].UploadedAt < list[j].UploadedAt
+	})
+	return list
+}
+
+func normalizeImageMetadata(metadata ImageMetadata) ImageMetadata {
+	if metadata.StorageSource == "" {
+		metadata.StorageSource = "local"
+	}
+	if metadata.StorageType == "" {
+		metadata.StorageType = "local"
+	}
+	if metadata.ObjectKey == "" {
+		metadata.ObjectKey = strings.TrimPrefix(metadata.Path, metadataStoragePrefix())
+	}
+	return metadata
 }
 
 func MetadataMatchesQuery(metadata ImageMetadata, storedName, query string) bool {

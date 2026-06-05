@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"image"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"easyimage/config"
+	"easyimage/internal/storage"
 
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
@@ -30,6 +32,17 @@ import (
 type imageProcessJob struct {
 	filePath string
 	cfg      *config.Config
+}
+
+type UploadTarget struct {
+	OriginalName string
+	BaseName     string
+	Ext          string
+	StoragePath  string
+	FileName     string
+	RelativePath string
+	ObjectKey    string
+	UploadedAt   time.Time
 }
 
 var imageProcessQueue = make(chan imageProcessJob, runtime.NumCPU()*64)
@@ -54,6 +67,16 @@ func init() {
 
 // ProcessUpload 处理上传文件
 func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config.Config, from string) map[string]interface{} {
+	sourceID := c.PostForm("storage_source")
+	source, _ := cfg.StorageSourceByID(sourceID)
+	if source.Type == "s3" {
+		return ProcessS3Upload(c.Request.Context(), fileHeader, cfg, source, from)
+	}
+	return ProcessLocalUpload(c, fileHeader, cfg, from)
+}
+
+// ProcessLocalUpload 处理本地上传文件
+func ProcessLocalUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config.Config, from string) map[string]interface{} {
 	// 检查文件大小
 	if fileHeader.Size > cfg.MaxSize {
 		return map[string]interface{}{
@@ -63,31 +86,17 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 		}
 	}
 
-	// 检查文件扩展名
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(fileHeader.Filename), "."))
-	if !isAllowedExtension(ext, cfg.Extensions) {
+	target, targetErr := BuildUploadTarget(fileHeader.Filename, cfg, config.StorageSourceConfig{ID: "local", Type: "local"})
+	if targetErr != nil {
 		return map[string]interface{}{
 			"result":  "failed",
 			"code":    400,
-			"message": "不支持的文件格式: " + ext,
+			"message": targetErr.Error(),
 		}
 	}
 
-	originalName := OriginalUploadName(fileHeader.Filename)
-
-	// 生成文件名
-	fileName := GenerateFileName(strings.TrimSuffix(originalName, filepath.Ext(originalName)), cfg.ImgName)
-	newFileName := fileName + "." + ext
-
-	// 生成存储路径
-	now := time.Now()
-	storagePath := cfg.StoragePath
-	storagePath = strings.Replace(storagePath, "Y", fmt.Sprintf("%04d", now.Year()), 1)
-	storagePath = strings.Replace(storagePath, "m", fmt.Sprintf("%02d", now.Month()), 1)
-	storagePath = strings.Replace(storagePath, "d", fmt.Sprintf("%02d", now.Day()), 1)
-
 	// 完整的存储目录
-	uploadDir, dirErr := SanitizePath(filepath.Join(".", cfg.Path, storagePath))
+	uploadDir, dirErr := SanitizePath(filepath.Join(".", cfg.Path, target.StoragePath))
 	if dirErr != nil {
 		return map[string]interface{}{
 			"result":  "failed",
@@ -106,7 +115,7 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	}
 
 	// 完整的文件路径
-	filePath, pathErr := SanitizePath(filepath.Join(uploadDir, newFileName))
+	filePath, pathErr := SanitizePath(filepath.Join(uploadDir, target.FileName))
 	if pathErr != nil {
 		return map[string]interface{}{
 			"result":  "failed",
@@ -125,7 +134,7 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	}
 
 	// SVG 安全检查：防止 XSS 攻击
-	if ext == "svg" {
+	if target.Ext == "svg" {
 		if !CheckSVGSecurity(filePath) {
 			os.Remove(filePath)
 			return map[string]interface{}{
@@ -137,7 +146,7 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	}
 
 	// 生成访问URL
-	relativePath := cfg.Path + storagePath + newFileName
+	relativePath := target.RelativePath
 	imageURL := cfg.Domain + relativePath
 
 	// 生成缩略图URL
@@ -163,13 +172,13 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 
 	// 异步处理图片后处理（压缩、水印、格式转换、WebP转换）
 	StartImagePostProcess(filePath, cfg)
-	SaveImageMetadata(relativePath, originalName, fileHeader.Size, from, now)
+	SaveImageMetadataWithStorage(relativePath, target.OriginalName, fileHeader.Size, from, target.UploadedAt, "local", "local", target.ObjectKey, imageURL, thumbURL)
 
 	// 生成WebP URL（如果配置了WebP转换）
 	// WebP 文件存储在 cfg.Path + "webp/" 下，镜像原始目录结构
 	webpURL := ""
 	if cfg.WebpConvert == 1 {
-		webpRelativePath := cfg.Path + "webp/" + storagePath + fileName + ".webp"
+		webpRelativePath := cfg.Path + "webp/" + target.StoragePath + target.BaseName + ".webp"
 		webpURL = cfg.Domain + webpRelativePath
 		if cfg.HidePath == 1 {
 			webpURL = strings.Replace(webpURL, cfg.Path, "/", 1)
@@ -177,15 +186,87 @@ func ProcessUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *config
 	}
 
 	return map[string]interface{}{
-		"result":        "success",
-		"code":          200,
-		"url":           imageURL,
-		"srcName":       strings.TrimSuffix(originalName, filepath.Ext(originalName)),
-		"original_name": originalName,
-		"thumb":         thumbURL,
-		"del":           delURL,
-		"webp_url":      webpURL,
+		"result":         "success",
+		"code":           200,
+		"url":            imageURL,
+		"srcName":        strings.TrimSuffix(target.OriginalName, filepath.Ext(target.OriginalName)),
+		"original_name":  target.OriginalName,
+		"thumb":          thumbURL,
+		"del":            delURL,
+		"webp_url":       webpURL,
+		"storage_source": "local",
 	}
+}
+
+func ProcessS3Upload(ctx context.Context, fileHeader *multipart.FileHeader, cfg *config.Config, source config.StorageSourceConfig, from string) map[string]interface{} {
+	if fileHeader.Size > cfg.MaxSize {
+		return map[string]interface{}{"result": "failed", "code": 400, "message": fmt.Sprintf("文件大小超过限制: %d bytes", cfg.MaxSize)}
+	}
+	target, err := BuildUploadTarget(fileHeader.Filename, cfg, source)
+	if err != nil {
+		return map[string]interface{}{"result": "failed", "code": 400, "message": err.Error()}
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		return map[string]interface{}{"result": "failed", "code": 500, "message": "读取文件失败"}
+	}
+	defer file.Close()
+
+	var body io.Reader = file
+	if target.Ext == "svg" {
+		content, err := io.ReadAll(io.LimitReader(file, cfg.MaxSize+1))
+		if err != nil || int64(len(content)) > cfg.MaxSize || !IsSafeSVGContent(content) {
+			return map[string]interface{}{"result": "failed", "code": 400, "message": "SVG文件包含不安全内容"}
+		}
+		body = bytes.NewReader(content)
+	}
+
+	store, err := storage.NewS3Store(ctx, source)
+	if err != nil {
+		return map[string]interface{}{"result": "failed", "code": 500, "message": "S3配置无效"}
+	}
+	if err := store.Put(ctx, target.ObjectKey, body, fileHeader.Size, storage.ContentType(target.FileName)); err != nil {
+		return map[string]interface{}{"result": "failed", "code": 500, "message": "上传到S3失败"}
+	}
+
+	imageURL := storage.PublicURL(source, target.ObjectKey)
+	thumbURL := imageURL
+	SaveImageMetadataWithStorage(target.RelativePath, target.OriginalName, fileHeader.Size, from, target.UploadedAt, source.ID, "s3", target.ObjectKey, imageURL, thumbURL)
+	delURL := ""
+	if cfg.ShowUserHashDel == 1 {
+		delURL = cfg.Domain + "/app/del_hash?hash=" + EncryptHash(target.RelativePath, cfg.Password)
+	}
+	return map[string]interface{}{
+		"result":         "success",
+		"code":           200,
+		"url":            imageURL,
+		"srcName":        strings.TrimSuffix(target.OriginalName, filepath.Ext(target.OriginalName)),
+		"original_name":  target.OriginalName,
+		"thumb":          thumbURL,
+		"del":            delURL,
+		"storage_source": source.ID,
+	}
+}
+
+func BuildUploadTarget(originalFilename string, cfg *config.Config, source config.StorageSourceConfig) (UploadTarget, error) {
+	originalName := OriginalUploadName(originalFilename)
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(originalName), "."))
+	if !isAllowedExtension(ext, cfg.Extensions) {
+		return UploadTarget{}, fmt.Errorf("不支持的文件格式: %s", ext)
+	}
+	now := time.Now()
+	storagePath := cfg.StoragePath
+	storagePath = strings.Replace(storagePath, "Y", fmt.Sprintf("%04d", now.Year()), 1)
+	storagePath = strings.Replace(storagePath, "m", fmt.Sprintf("%02d", now.Month()), 1)
+	storagePath = strings.Replace(storagePath, "d", fmt.Sprintf("%02d", now.Day()), 1)
+	baseName := GenerateFileName(strings.TrimSuffix(originalName, filepath.Ext(originalName)), cfg.ImgName)
+	fileName := baseName + "." + ext
+	relativePath := cfg.Path + storagePath + fileName
+	objectKey, err := storage.ObjectKey(source, relativePath)
+	if err != nil {
+		return UploadTarget{}, err
+	}
+	return UploadTarget{OriginalName: originalName, BaseName: baseName, Ext: ext, StoragePath: storagePath, FileName: fileName, RelativePath: relativePath, ObjectKey: objectKey, UploadedAt: now}, nil
 }
 
 // isAllowedExtension 检查扩展名是否允许

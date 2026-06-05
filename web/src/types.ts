@@ -10,6 +10,14 @@ export interface SiteConfig {
   description: string
   max_size: number
   api_status: number
+  default_storage_source: string
+  storage_sources: StorageSourceOption[]
+}
+
+export interface StorageSourceOption {
+  id: string
+  name: string
+  type: string
 }
 
 export interface UploadBootstrap {
@@ -29,6 +37,7 @@ export interface UploadResult {
   srcName?: string
   original_name?: string
   del?: string
+  storage_source?: string
 }
 
 export interface GalleryFile {
@@ -96,8 +105,26 @@ export interface AdminConfig {
   storage_path: string
   time_format: string
   auto_delete: number
+  default_storage_source: string
+  storage_sources: StorageSourceConfig[]
   turnstile_secret_set: boolean
   recaptcha_secret_set: boolean
+}
+
+export interface StorageSourceConfig {
+  id: string
+  name: string
+  type: string
+  enabled: boolean
+  public_base_url: string
+  s3_endpoint: string
+  s3_region: string
+  s3_bucket: string
+  s3_prefix: string
+  s3_access_key_id: string
+  s3_access_key_secret: string
+  s3_force_path_style: boolean
+  s3_secret_set?: boolean
 }
 
 export interface AdminOverview {
