@@ -630,6 +630,7 @@ func Info(cfg *config.Config) gin.HandlerFunc {
 		img := c.Query("img")
 		if img == "" {
 			c.HTML(http.StatusBadRequest, "error.html", gin.H{
+				"config":  cfg,
 				"message": "图片参数错误",
 			})
 			return
@@ -639,6 +640,7 @@ func Info(cfg *config.Config) gin.HandlerFunc {
 		info, err := service.GetImageInfo(img, cfg)
 		if err != nil {
 			c.HTML(http.StatusNotFound, "error.html", gin.H{
+				"config":  cfg,
 				"message": "图片不存在",
 			})
 			return

@@ -9,8 +9,10 @@ const emit = defineEmits<{ notice: [message: string, type?: NoticeType] }>()
 const loading = ref(true)
 const saving = ref(false)
 const converting = ref(false)
+const uploadingIcon = ref(false)
 const overview = ref<AdminOverview | null>(null)
 const config = ref<AdminConfig | null>(null)
+const siteIconInput = ref<HTMLInputElement | null>(null)
 
 async function load() {
   loading.value = true
@@ -51,6 +53,29 @@ async function batchWebP() {
   }
 }
 
+async function uploadSiteIcon() {
+  if (!config.value) return
+  const file = siteIconInput.value?.files?.[0]
+  if (!file) {
+    emit('notice', '请选择图标文件', 'warning')
+    return
+  }
+
+  const formData = new FormData()
+  formData.append('icon', file)
+  uploadingIcon.value = true
+  try {
+    const result = await adminApi.uploadSiteIcon(formData)
+    config.value.site_icon = result.site_icon
+    if (siteIconInput.value) siteIconInput.value.value = ''
+    emit('notice', result.message || '图标已更新', 'success')
+  } catch (error) {
+    emit('notice', error instanceof Error ? error.message : '上传图标失败', 'danger')
+  } finally {
+    uploadingIcon.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -73,9 +98,21 @@ onMounted(load)
           <div class="form-section">
             <h4>站点</h4>
             <div class="form-row">
-              <label>站点标题<input v-model="config.title" class="form-control"></label>
+              <label>网站名称<input v-model="config.title" class="form-control"></label>
               <label>域名<input v-model="config.domain" class="form-control"></label>
               <label>图片域名<input v-model="config.imgurl" class="form-control"></label>
+            </div>
+            <div class="site-icon-editor">
+              <div class="site-icon-preview">
+                <img :src="config.site_icon" alt="当前网站图标">
+              </div>
+              <div class="site-icon-fields">
+                <label>网站图标<input ref="siteIconInput" type="file" class="form-control" accept=".ico,.png,.svg,image/x-icon,image/png,image/svg+xml"></label>
+                <p class="help-block">支持 ICO、PNG、SVG，文件大小不超过 512KB。上传后会自动刷新浏览器图标缓存。</p>
+                <button type="button" class="btn btn-default" :disabled="uploadingIcon" @click="uploadSiteIcon">
+                  <i class="icon" :class="uploadingIcon ? 'icon-spin icon-spinner' : 'icon-upload'"></i> {{ uploadingIcon ? '上传中...' : '上传图标' }}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -152,5 +189,11 @@ onMounted(load)
 .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
 label { font-weight: 500; }
 label .form-control, label textarea { margin-top: 6px; font-weight: 400; }
+.site-icon-editor { display: flex; gap: 14px; align-items: center; margin-top: 14px; padding: 12px; border: 1px solid #edf2f7; border-radius: 10px; background: #f8fafc; }
+.site-icon-preview { display: grid; flex: 0 0 58px; width: 58px; height: 58px; place-items: center; border: 1px solid #dbe3ef; border-radius: 14px; background: #fff; }
+.site-icon-preview img { max-width: 36px; max-height: 36px; object-fit: contain; }
+.site-icon-fields { flex: 1; min-width: 0; }
+.site-icon-fields .help-block { margin: 6px 0 8px; }
 @media (max-width: 900px) { .admin-config-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .site-icon-editor { align-items: stretch; flex-direction: column; } }
 </style>

@@ -18,6 +18,7 @@ const (
 
 type Config struct {
 	Title               string   `json:"title"`
+	SiteIcon            string   `json:"site_icon"`
 	Keywords            string   `json:"keywords"`
 	Description         string   `json:"description"`
 	Tips                string   `json:"tips"`
@@ -329,6 +330,9 @@ func setDefaults(cfg *Config) {
 	if cfg.StoragePath == "" {
 		cfg.StoragePath = "Y/m/d/"
 	}
+	if cfg.SiteIcon == "" {
+		cfg.SiteIcon = "/favicon.ico"
+	}
 	if cfg.MaxSize == 0 {
 		cfg.MaxSize = 10485760
 	}
@@ -395,6 +399,7 @@ func setDefaults(cfg *Config) {
 func getDefaultConfig() *Config {
 	cfg := &Config{
 		Title:           "简单图床 - EasyImage",
+		SiteIcon:        "/favicon.ico",
 		Keywords:        "简单图床,easyimage,无数据库图床",
 		Description:     "简单图床EasyImage是一款支持多文件上传的无数据库图床",
 		Domain:          defaultDomain,

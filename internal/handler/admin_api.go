@@ -4,6 +4,7 @@ import (
 	"easyimage/config"
 	"easyimage/internal/service"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,8 +16,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	siteIconDir     = "config/site-icon"
+	maxSiteIconSize = 512 * 1024
+)
+
+var allowedSiteIconExts = map[string]string{
+	".ico": "image/x-icon",
+	".png": "image/png",
+	".svg": "image/svg+xml",
+}
+
 type adminConfigPayload struct {
 	Title              string `json:"title"`
+	SiteIcon           string `json:"site_icon"`
 	Domain             string `json:"domain"`
 	ImageURL           string `json:"imgurl"`
 	MaxSize            int64  `json:"maxSize"`
@@ -137,6 +150,87 @@ func AdminConfigSaveAPI(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
+func AdminSiteIconUploadAPI(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		file, err := c.FormFile("icon")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "error", "message": "请选择图标文件"})
+			return
+		}
+		if file.Size <= 0 || file.Size > maxSiteIconSize {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "error", "message": "图标大小需小于 512KB"})
+			return
+		}
+
+		ext := strings.ToLower(filepath.Ext(file.Filename))
+		contentType, ok := allowedSiteIconExts[ext]
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "error", "message": "仅支持 ICO、PNG 或 SVG 图标"})
+			return
+		}
+
+		src, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "error", "message": "读取图标失败"})
+			return
+		}
+		defer src.Close()
+
+		content, err := io.ReadAll(io.LimitReader(src, maxSiteIconSize+1))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "error", "message": "读取图标失败"})
+			return
+		}
+		if len(content) == 0 || len(content) > maxSiteIconSize {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "error", "message": "图标大小需小于 512KB"})
+			return
+		}
+		if ext == ".svg" && !service.IsSafeSVGContent(content) {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "error", "message": "SVG 图标包含不安全内容"})
+			return
+		}
+
+		if err := os.MkdirAll(siteIconDir, 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "error", "message": "创建图标目录失败"})
+			return
+		}
+		for existingExt := range allowedSiteIconExts {
+			_ = os.Remove(filepath.Join(siteIconDir, "favicon"+existingExt))
+		}
+
+		if err := os.WriteFile(filepath.Join(siteIconDir, "favicon"+ext), content, 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "error", "message": "保存图标失败"})
+			return
+		}
+
+		cfg.SiteIcon = fmt.Sprintf("/favicon.ico?v=%d", time.Now().Unix())
+		if err := config.Save(cfg); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "error", "message": "保存配置失败"})
+			return
+		}
+
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, gin.H{"result": "success", "message": "图标已更新", "site_icon": cfg.SiteIcon, "content_type": contentType})
+	}
+}
+
+func SiteIcon(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		for _, ext := range []string{".ico", ".png", ".svg"} {
+			path := filepath.Join(siteIconDir, "favicon"+ext)
+			if _, err := os.Stat(path); err == nil {
+				c.Header("Cache-Control", "public, max-age=3600")
+				c.Header("Content-Type", allowedSiteIconExts[ext])
+				c.File(path)
+				return
+			}
+		}
+
+		c.Header("Cache-Control", "public, max-age=86400")
+		c.File("./public/images/image_icon_153794.png")
+	}
+}
+
 func AdminBatchWebPAPI(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		BatchWebP(cfg)(c)
@@ -230,6 +324,7 @@ func AdminDeleteAPI(cfg *config.Config) gin.HandlerFunc {
 func adminConfigFromConfig(cfg *config.Config) adminConfigPayload {
 	return adminConfigPayload{
 		Title:              cfg.Title,
+		SiteIcon:           cfg.SiteIcon,
 		Domain:             cfg.Domain,
 		ImageURL:           cfg.ImageURL,
 		MaxSize:            cfg.MaxSize,
@@ -266,6 +361,9 @@ func adminConfigFromConfig(cfg *config.Config) adminConfigPayload {
 func applyAdminConfigPayload(cfg *config.Config, req adminConfigPayload) {
 	if req.Title != "" {
 		cfg.Title = req.Title
+	}
+	if req.SiteIcon != "" {
+		cfg.SiteIcon = req.SiteIcon
 	}
 	if req.Domain != "" {
 		cfg.Domain = req.Domain

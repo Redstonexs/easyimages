@@ -901,7 +901,11 @@ func CheckSVGSecurity(path string) bool {
 	if err != nil {
 		return false
 	}
+	return IsSafeSVGContent(content)
+}
 
+// IsSafeSVGContent reports whether SVG bytes avoid active-content vectors.
+func IsSafeSVGContent(content []byte) bool {
 	lower := bytes.ToLower(content)
 
 	// 检查已知的 XSS 向量

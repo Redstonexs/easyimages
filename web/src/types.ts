@@ -67,6 +67,7 @@ export type AdminView = 'manager' | 'chart' | 'history' | 'urllist' | 'filer'
 
 export interface AdminConfig {
   title: string
+  site_icon: string
   domain: string
   imgurl: string
   maxSize: number
