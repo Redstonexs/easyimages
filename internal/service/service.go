@@ -957,7 +957,17 @@ func getSafePathWithConfig(userPath string, cfg *config.Config) (string, error) 
 // components (e.g. uploadId) to break CodeQL taint chains.
 func SanitizePath(pathStr string) (string, error) {
 	cfg := config.Get()
-	allowedDir, err := filepath.Abs(filepath.Join(".", cfg.Path))
+	return SanitizePathForConfig(pathStr, cfg)
+}
+
+// SanitizePathForConfig validates a filesystem path against the storage root
+// from the provided config instead of the package-level config singleton.
+func SanitizePathForConfig(pathStr string, cfg *config.Config) (string, error) {
+	pathPrefix := "/i/"
+	if cfg != nil && cfg.Path != "" {
+		pathPrefix = cfg.Path
+	}
+	allowedDir, err := filepath.Abs(storageRootForURLPath(pathPrefix))
 	if err != nil {
 		return "", fmt.Errorf("invalid config path")
 	}
@@ -973,6 +983,16 @@ func SanitizePath(pathStr string) (string, error) {
 		return "", fmt.Errorf("invalid path: outside allowed directory")
 	}
 	return filepath.Join(allowedDir, relPath), nil
+}
+
+func storageRootForURLPath(pathPrefix string) string {
+	if pathPrefix == "" {
+		pathPrefix = "/i/"
+	}
+	if strings.HasPrefix(pathPrefix, "/") || strings.HasPrefix(pathPrefix, `\`) {
+		return "." + pathPrefix
+	}
+	return filepath.Join(".", pathPrefix)
 }
 
 // sanitizeFilename 清理文件名，移除危险字符

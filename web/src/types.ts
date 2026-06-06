@@ -9,6 +9,7 @@ export interface SiteConfig {
   title: string
   description: string
   max_size: number
+  chunk_size: number
   api_status: number
   default_storage_source: string
   storage_sources: StorageSourceOption[]

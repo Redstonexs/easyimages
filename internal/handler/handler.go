@@ -34,6 +34,7 @@ func Index(cfg *config.Config) gin.HandlerFunc {
 				"title":                  cfg.Title,
 				"description":            cfg.Description,
 				"max_size":               cfg.MaxSize,
+				"chunk_size":             publicChunkSize(cfg),
 				"api_status":             cfg.APIStatus,
 				"default_storage_source": defaultPublicStorageSource(cfg),
 				"storage_sources":        publicStorageSources(cfg),
@@ -74,6 +75,14 @@ func publicStorageSources(cfg *config.Config) []gin.H {
 		items = append(items, gin.H{"id": source.ID, "name": source.Name, "type": source.Type})
 	}
 	return items
+}
+
+func publicChunkSize(cfg *config.Config) int64 {
+	const defaultChunkSize = 16 * 1024 * 1024
+	if cfg != nil && cfg.Chunks > 0 {
+		return int64(cfg.Chunks) * 1024 * 1024
+	}
+	return defaultChunkSize
 }
 
 // CaptchaAPI 获取验证码
@@ -269,7 +278,7 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 				return
 			}
 			chunkIndex, err = strconv.Atoi(chunkIndexStr)
-			if err != nil || chunkIndex < 0 {
+			if err != nil || chunkIndex < 0 || chunkIndex >= totalChunks {
 				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的分片索引"})
 				return
 			}
@@ -289,33 +298,16 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		chunk, formFileErr := c.FormFile("chunk")
-
-		// 保存分片（如果有实际文件数据）
-		chunkDir, pathErr := service.SanitizePath(filepath.Join(".", cfg.Path, "chunks", uploadId))
+		chunkDir, pathErr := service.SanitizePathForConfig(storagePathCandidate(cfg.Path, "chunks", uploadId), cfg)
 		if pathErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的上传路径"})
 			return
-		}
-		if chunk != nil {
-			if chunk.Size == 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": fmt.Sprintf("分片 %d 为空文件", chunkIndex)})
-				return
-			}
-			if err := os.MkdirAll(chunkDir, 0755); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建分片目录失败"})
-				return
-			}
-			chunkPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", chunkIndex))
-			if err := c.SaveUploadedFile(chunk, chunkPath); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "保存分片失败"})
-				return
-			}
 		}
 
 		// 并发上传时，最后一个到达的分片不一定是 totalChunks-1。
 		// 不再自动合并，客户端需发送 merge=true 参数显式触发合并。
 		if !isMerge {
+			chunk, formFileErr := c.FormFile("chunk")
 			if chunk == nil {
 				errMsg := "缺少分片数据"
 				if formFileErr != nil {
@@ -325,42 +317,61 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": errMsg})
 				return
 			}
+			if chunk.Size == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": fmt.Sprintf("分片 %d 为空文件", chunkIndex)})
+				return
+			}
+			if err := os.MkdirAll(chunkDir, 0755); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建分片目录失败"})
+				return
+			}
+			chunkPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", chunkIndex))
+			saveStarted := time.Now()
+			if err := c.SaveUploadedFile(chunk, chunkPath); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "保存分片失败"})
+				return
+			}
+			if elapsed := time.Since(saveStarted); elapsed > 2*time.Second {
+				log.Printf("[chunk upload] slow chunk save uploadId=%s chunkIndex=%d size=%d elapsed=%s", uploadId, chunkIndex, chunk.Size, elapsed)
+			}
 			c.JSON(http.StatusOK, gin.H{"result": "success", "code": 200, "message": "分片上传成功", "chunkIndex": chunkIndex})
 			return
 		}
 
 		// === 合并所有分片 ===
-		// 先验证所有分片都已上传完成
+		mergeStarted := time.Now()
+		partPaths := make([]string, totalChunks)
+		var totalSize int64
 		for i := 0; i < totalChunks; i++ {
 			partPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", i))
-			if _, err := os.Stat(partPath); err != nil {
+			info, err := os.Stat(partPath)
+			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"result": "failed", "code": 400,
 					"message": fmt.Sprintf("分片 %d 尚未上传，无法合并", i),
 				})
 				return
 			}
+			if info.Size() == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": fmt.Sprintf("分片 %d 为空文件", i)})
+				return
+			}
+			totalSize += info.Size()
+			partPaths[i] = partPath
 		}
-
-		originalName := service.OriginalUploadName(filename)
-		if originalName == "" {
-			originalName = "upload"
-		}
-		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(originalName), "."))
-		if !service.IsAllowedExtension(originalName, cfg) {
+		if totalSize > cfg.MaxSize {
 			os.RemoveAll(chunkDir)
-			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "不支持的文件格式: " + ext})
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": fmt.Sprintf("文件大小超过限制: %s", service.FormatSize(cfg.MaxSize))})
 			return
 		}
 
-		baseName := strings.TrimSuffix(originalName, filepath.Ext(originalName))
-		newFileName := service.GenerateFileName(baseName, cfg.ImgName) + "." + ext
-		now := time.Now()
-		storagePath := cfg.StoragePath
-		storagePath = strings.Replace(storagePath, "Y", fmt.Sprintf("%04d", now.Year()), 1)
-		storagePath = strings.Replace(storagePath, "m", fmt.Sprintf("%02d", now.Month()), 1)
-		storagePath = strings.Replace(storagePath, "d", fmt.Sprintf("%02d", now.Day()), 1)
-		uploadDir, dirErr := service.SanitizePath(filepath.Join(".", cfg.Path, storagePath))
+		target, targetErr := service.BuildUploadTarget(filename, cfg, config.StorageSourceConfig{ID: "local", Type: "local"})
+		if targetErr != nil {
+			os.RemoveAll(chunkDir)
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": targetErr.Error()})
+			return
+		}
+		uploadDir, dirErr := service.SanitizePathForConfig(storagePathCandidate(cfg.Path, target.StoragePath), cfg)
 		if dirErr != nil {
 			os.RemoveAll(chunkDir)
 			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "存储路径无效"})
@@ -371,7 +382,7 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建存储目录失败"})
 			return
 		}
-		finalPath, finalPathErr := service.SanitizePath(filepath.Join(uploadDir, newFileName))
+		finalPath, finalPathErr := service.SanitizePathForConfig(filepath.Join(uploadDir, target.FileName), cfg)
 		if finalPathErr != nil {
 			os.RemoveAll(chunkDir)
 			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的文件路径"})
@@ -385,10 +396,9 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "创建目标文件失败"})
 			return
 		}
-		var totalSize int64
+		buf := make([]byte, 1024*1024)
 		for i := 0; i < totalChunks; i++ {
-			partPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", i))
-			partFile, err := os.Open(partPath)
+			partFile, err := os.Open(partPaths[i])
 			if err != nil {
 				outFile.Close()
 				os.Remove(finalPath)
@@ -396,7 +406,7 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": fmt.Sprintf("缺少分片 %d", i)})
 				return
 			}
-			n, err := io.Copy(outFile, partFile)
+			_, err = io.CopyBuffer(outFile, partFile, buf)
 			partFile.Close()
 			if err != nil {
 				outFile.Close()
@@ -405,27 +415,24 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": fmt.Sprintf("合并分片 %d 失败: %v", i, err)})
 				return
 			}
-			totalSize += n
 		}
-		outFile.Close()
-		os.RemoveAll(chunkDir) // 清理分片
-
-		// 检查文件大小
-		if totalSize > cfg.MaxSize {
+		if err := outFile.Close(); err != nil {
 			os.Remove(finalPath)
-			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": fmt.Sprintf("文件大小超过限制: %s", service.FormatSize(cfg.MaxSize))})
+			os.RemoveAll(chunkDir)
+			c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "code": 500, "message": "写入目标文件失败"})
 			return
 		}
+		os.RemoveAll(chunkDir) // 清理分片
 
 		// SVG 安全检查
-		if ext == "svg" && !service.CheckSVGSecurity(finalPath) {
+		if target.Ext == "svg" && !service.CheckSVGSecurity(finalPath) {
 			os.Remove(finalPath)
 			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "SVG文件包含不安全内容"})
 			return
 		}
 
 		// 生成URL
-		relativePath := cfg.Path + storagePath + newFileName
+		relativePath := target.RelativePath
 		imageURL := cfg.Domain + relativePath
 		thumbURL := cfg.Domain + "/app/thumb?img=" + relativePath
 		delURL := ""
@@ -440,23 +447,36 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		service.StartImagePostProcess(finalPath, cfg)
-		service.SaveImageMetadata(relativePath, originalName, totalSize, "web", now)
+		service.SaveImageMetadataWithStorage(relativePath, target.OriginalName, totalSize, "web", target.UploadedAt, "local", "local", target.ObjectKey, imageURL, thumbURL)
 
 		// 生成WebP URL（与 ProcessUpload 保持一致）
 		webpURL := ""
 		if cfg.WebpConvert == 1 {
-			webpRelativePath := cfg.Path + "webp/" + storagePath + newFileName
+			webpRelativePath := cfg.Path + "webp/" + target.StoragePath + target.BaseName + ".webp"
 			webpURL = cfg.Domain + webpRelativePath
 			if cfg.HidePath == 1 {
 				webpURL = strings.Replace(webpURL, cfg.Path, "/", 1)
 			}
 		}
+		if elapsed := time.Since(mergeStarted); elapsed > 2*time.Second {
+			log.Printf("[chunk upload] slow merge uploadId=%s chunks=%d size=%d elapsed=%s", uploadId, totalChunks, totalSize, elapsed)
+		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"result": "success", "code": 200,
-			"url": imageURL, "srcName": baseName, "original_name": originalName, "thumb": thumbURL, "del": delURL, "webp_url": webpURL,
+			"url": imageURL, "srcName": strings.TrimSuffix(target.OriginalName, filepath.Ext(target.OriginalName)), "original_name": target.OriginalName, "thumb": thumbURL, "del": delURL, "webp_url": webpURL,
 		})
 	}
+}
+
+func storagePathCandidate(pathPrefix string, elems ...string) string {
+	parts := make([]string, 0, len(elems)+2)
+	parts = append(parts, ".")
+	if trimmed := strings.Trim(pathPrefix, `/\`); trimmed != "" {
+		parts = append(parts, trimmed)
+	}
+	parts = append(parts, elems...)
+	return filepath.Join(parts...)
 }
 
 // ChunkCleanup 清理失败上传的分片目录
@@ -475,18 +495,21 @@ func ChunkCleanup(cfg *config.Config) gin.HandlerFunc {
 				return
 			}
 		}
+		unlockS3State := lockS3MultipartState(uploadId)
 		if state, err := storage.LoadMultipartState(uploadId); err == nil && state.S3UploadID != "" {
 			if source, ok := cfg.StorageSourceByID(state.SourceID); ok && source.Type == "s3" {
-				if store, err := storage.NewS3Store(c.Request.Context(), source); err == nil {
+				if store, err := newS3MultipartStore(c.Request.Context(), source); err == nil {
 					_ = store.AbortMultipart(c.Request.Context(), state.ObjectKey, state.S3UploadID)
 				}
 			}
 			_ = storage.DeleteMultipartState(uploadId)
+			unlockS3State()
 			c.JSON(http.StatusOK, gin.H{"result": "success", "code": 200})
 			return
 		}
+		unlockS3State()
 
-		chunkDir, pathErr := service.SanitizePath(filepath.Join(".", cfg.Path, "chunks", uploadId))
+		chunkDir, pathErr := service.SanitizePathForConfig(storagePathCandidate(cfg.Path, "chunks", uploadId), cfg)
 		if pathErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的路径"})
 			return

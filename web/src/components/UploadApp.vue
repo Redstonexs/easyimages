@@ -21,7 +21,7 @@ interface ProgressItem {
   message: string
 }
 
-const CHUNK_SIZE = 16 * 1024 * 1024
+const DEFAULT_CHUNK_SIZE = 16 * 1024 * 1024
 const MAX_CONCURRENT_CHUNKS = 4
 const MAX_RETRIES = 3
 
@@ -47,6 +47,7 @@ const externalCaptchaToken = ref('')
 const turnstileRendered = ref(false)
 
 const maxSizeLabel = computed(() => formatSize(props.bootstrap.config.max_size))
+const chunkSize = computed(() => props.bootstrap.config.chunk_size > 0 ? props.bootstrap.config.chunk_size : DEFAULT_CHUNK_SIZE)
 const overallPercent = computed(() => {
   if (totalSize.value === 0) return 0
   const percent = Math.round((uploadedTotal.value / totalSize.value) * 100)
@@ -125,7 +126,7 @@ async function handleFiles(fileList: FileList) {
     item.status = 'uploading'
 
     try {
-      const result = file.size > CHUNK_SIZE
+      const result = file.size > chunkSize.value
         ? await uploadFileChunked(
           file,
           loaded => updateFileProgress(item, baseUploaded, loaded),
@@ -211,7 +212,8 @@ async function uploadFileChunked(
   onProgress: (loaded: number) => void,
   onProcessing: (message: string) => void
 ): Promise<UploadResult> {
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
+  const currentChunkSize = chunkSize.value
+  const totalChunks = Math.ceil(file.size / currentChunkSize)
   const uploadId = crypto.randomUUID ? crypto.randomUUID() : `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
   const chunkProgress = new Array<number>(totalChunks).fill(0)
   let nextChunk = 0
@@ -223,8 +225,8 @@ async function uploadFileChunked(
       const chunkIndex = nextChunk++
       if (chunkIndex >= totalChunks) break
 
-      const start = chunkIndex * CHUNK_SIZE
-      const end = Math.min(start + CHUNK_SIZE, file.size)
+      const start = chunkIndex * currentChunkSize
+      const end = Math.min(start + currentChunkSize, file.size)
       let lastError: Error | null = null
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {

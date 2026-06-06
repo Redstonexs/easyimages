@@ -52,7 +52,7 @@
 - Bundled default `config/*.php` templates do not trigger migration; copied real PHP configs do.
 - Auto-migration backs PHP configs up to `config/php_backup/`, migrates PHP data dirs, writes `config/config.json`, `config/config.guest.json`, `config/api_key.json`, and creates `config/install.lock`.
 - Default config values live in `config/config.go`; notable defaults are `Path=/i/`, `StoragePath=Y/m/d/`, `Port=8080`, `ListNumber=20`, `ListDate=10`, `SiteIcon=/favicon.ico`, `DefaultStorageSource=local`, and new installs `MustLogin=1`.
-- Private upload mode is the existing `MustLogin` field and `middleware.CheckLogin(cfg)` on `/app/upload` and chunk routes; API upload stays token-authenticated and is not gated by `MustLogin`.
+- Private upload mode is the existing `MustLogin` field: anonymous `GET /` redirects to `/admin/index?redirect=%2F`, while `/app/upload` and chunk routes keep `middleware.CheckLogin(cfg)` JSON 401 behavior for XHR; API upload stays token-authenticated and is not gated by `MustLogin`.
 - Keep `MustLogin=1` in `getDefaultConfig()` for new installs only; do not set it in `setDefaults()` or old `mustLogin:0` configs would be silently changed.
 - Handlers are wired with `*config.Config`; prefer passing that through instead of adding new global `config.Get()` reads in handlers.
 - Tests often `os.Chdir(t.TempDir())`; config package globals can stay cached, so isolate config-touching tests carefully.
@@ -60,7 +60,8 @@
 ## Storage Sources
 
 - Storage sources are configured by `Config.DefaultStorageSource` and `Config.StorageSources`; `ensureStorageDefaults` always preserves an enabled `local` source.
-- Admin config edits storage sources as JSON. `s3_access_key_secret` is omitted on read; an empty secret on save preserves the existing secret for that source ID.
+- Admin config edits storage sources through `StorageSourcesEditor.vue` and `web/src/shared/storageSources.ts`, but still posts the full `storage_sources` array to `/admin/api/config`.
+- `s3_access_key_secret` is omitted on read; an empty secret on save preserves the existing secret for that source ID. Keep existing S3 source IDs stable because image metadata stores `storage_source` and deletes/details use it to find the source.
 - S3-compatible sources use AWS SDK v2, support custom endpoint, region, bucket, prefix, path-style mode, and optional public base URL.
 - Local uploads run SVG file scanning and async compression/watermark/WebP post-processing; S3 uploads go directly to object storage and store the public URL in metadata.
 - Normal S3 SVG uploads are scanned in memory before `PutObject`; S3 multipart SVG uploads are intentionally rejected.
@@ -99,6 +100,7 @@
 
 - Sessions are in-memory `sync.Map` tokens in the `session` cookie with 14-day max age; process restarts invalidate sessions.
 - Session cookie `Secure` is set only when `cfg.Domain` starts with `https`.
+- Admin login accepts a `redirect` form/query value for private-mode return-to-home, but `safeLoginRedirect` only allows site-relative `/...` paths; do not replace it with raw redirects.
 - Login rate limiting is per `ClientIP`: 5 failed attempts within 5 minutes.
 - New passwords are bcrypt; migrated PHP passwords can still validate as SHA256 through `legacy_password.go`.
 - `ManagerAction` intentionally does not update sensitive fields like `Password`, `User`, `Path`, `Port`, and `HideKey`.
