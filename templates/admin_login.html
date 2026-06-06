@@ -58,6 +58,7 @@
             <div class="alert alert-danger">{{.error}}</div>
             {{end}}
             <form method="POST" action="/admin/index" id="loginForm">
+                <input type="hidden" name="redirect" value="{{.redirect}}">
                 <div class="form-group">
                     <label>用户名</label>
                     <input type="text" name="user" class="form-control" required placeholder="请输入用户名">

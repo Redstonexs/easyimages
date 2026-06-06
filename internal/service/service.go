@@ -465,7 +465,7 @@ func GetDirList(dirPath string) []string {
 		return nil
 	}
 
-	var dirs []string
+	dirs := make([]string, 0)
 	for _, entry := range entries {
 		if entry.IsDir() && !internalDirs[entry.Name()] {
 			dirs = append(dirs, entry.Name()+"/")

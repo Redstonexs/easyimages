@@ -156,6 +156,10 @@ func AdminConfigSaveAPI(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"result": "error", "msg": "参数错误"})
 			return
 		}
+		if err := validateAdminStorageSources(cfg.StorageSources, req.StorageSources, req.DefaultStorageSource); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"result": "error", "msg": err.Error()})
+			return
+		}
 
 		applyAdminConfigPayload(cfg, req)
 		if err := config.Save(cfg); err != nil {
@@ -477,22 +481,131 @@ func mergeAdminStorageSources(existing []config.StorageSourceConfig, payloads []
 	for _, source := range existing {
 		secretByID[source.ID] = source.S3AccessKeySecret
 	}
-	sources := make([]config.StorageSourceConfig, 0, len(payloads))
+	sources := make([]config.StorageSourceConfig, 0, len(payloads)+1)
+	hasLocal := false
 	for _, item := range payloads {
-		if item.ID == "" || item.Type == "" {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
 			continue
+		}
+		sourceType := strings.TrimSpace(item.Type)
+		if id == "local" {
+			hasLocal = true
+			sourceType = "local"
+			item.Enabled = true
+		} else if sourceType == "" {
+			sourceType = "s3"
+		}
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = id
+		}
+		if id == "local" && name == "local" {
+			name = "本地存储"
 		}
 		secret := item.S3AccessKeySecret
 		if secret == "" {
-			secret = secretByID[item.ID]
+			secret = secretByID[id]
 		}
 		sources = append(sources, config.StorageSourceConfig{
-			ID: item.ID, Name: item.Name, Type: item.Type, Enabled: item.Enabled, PublicBaseURL: item.PublicBaseURL,
-			S3Endpoint: item.S3Endpoint, S3Region: item.S3Region, S3Bucket: item.S3Bucket, S3Prefix: item.S3Prefix,
-			S3AccessKeyID: item.S3AccessKeyID, S3AccessKeySecret: secret, S3ForcePathStyle: item.S3ForcePathStyle,
+			ID:                id,
+			Name:              name,
+			Type:              sourceType,
+			Enabled:           item.Enabled,
+			PublicBaseURL:     strings.TrimSpace(item.PublicBaseURL),
+			S3Endpoint:        strings.TrimSpace(item.S3Endpoint),
+			S3Region:          strings.TrimSpace(item.S3Region),
+			S3Bucket:          strings.TrimSpace(item.S3Bucket),
+			S3Prefix:          strings.TrimSpace(item.S3Prefix),
+			S3AccessKeyID:     strings.TrimSpace(item.S3AccessKeyID),
+			S3AccessKeySecret: secret,
+			S3ForcePathStyle:  item.S3ForcePathStyle,
 		})
 	}
+	if !hasLocal {
+		sources = append([]config.StorageSourceConfig{{ID: "local", Name: "本地存储", Type: "local", Enabled: true}}, sources...)
+	}
 	return sources
+}
+
+func validateAdminStorageSources(
+	existing []config.StorageSourceConfig,
+	payloads []adminStorageSourcePayload,
+	defaultSource string,
+) error {
+	if len(payloads) == 0 {
+		return nil
+	}
+
+	secretByID := make(map[string]string, len(existing))
+	for _, source := range existing {
+		secretByID[source.ID] = source.S3AccessKeySecret
+	}
+
+	seenIDs := make(map[string]bool, len(payloads))
+	enabledIDs := make(map[string]bool, len(payloads))
+	hasLocal := false
+	for _, item := range payloads {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			return fmt.Errorf("存储源 ID 不能为空")
+		}
+		if !isValidStorageSourceID(id) {
+			return fmt.Errorf("存储源 %q 的 ID 只能包含字母、数字、横线和下划线", id)
+		}
+		if seenIDs[id] {
+			return fmt.Errorf("存储源 ID %q 重复", id)
+		}
+		seenIDs[id] = true
+
+		sourceType := strings.TrimSpace(item.Type)
+		if id == "local" {
+			hasLocal = true
+			enabledIDs[id] = true
+			if sourceType != "" && sourceType != "local" {
+				return fmt.Errorf("本地存储源 local 的类型必须为 local")
+			}
+			continue
+		}
+		if sourceType != "s3" {
+			return fmt.Errorf("存储源 %q 的类型暂仅支持 s3", id)
+		}
+		if !item.Enabled {
+			continue
+		}
+
+		enabledIDs[id] = true
+		if strings.TrimSpace(item.S3Bucket) == "" {
+			return fmt.Errorf("存储源 %q 启用时必须填写 Bucket", id)
+		}
+		if strings.TrimSpace(item.S3AccessKeyID) == "" {
+			return fmt.Errorf("存储源 %q 启用时必须填写 Access Key ID", id)
+		}
+		if item.S3AccessKeySecret == "" && secretByID[id] == "" {
+			return fmt.Errorf("存储源 %q 启用时必须填写 Access Key Secret", id)
+		}
+	}
+
+	if !hasLocal {
+		return fmt.Errorf("必须保留本地存储源 local")
+	}
+	if defaultSource == "" {
+		defaultSource = "local"
+	}
+	if !enabledIDs[defaultSource] {
+		return fmt.Errorf("默认上传源必须指向已启用的存储源")
+	}
+	return nil
+}
+
+func isValidStorageSourceID(id string) bool {
+	for _, r := range id {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return id != ""
 }
 
 func adminChartPayloadFromConfig(cfg *config.Config) adminChartPayload {
@@ -616,6 +729,9 @@ func adminFilerPayload(c *gin.Context, cfg *config.Config) (adminFilerData, erro
 	}
 
 	dirs := service.GetDirList("." + reqPath)
+	if dirs == nil {
+		dirs = []string{}
+	}
 	files := service.GetFileList("."+reqPath+"*.*", cfg.ShowSort)
 	parentPath := ""
 	if reqPath != cfg.Path {
