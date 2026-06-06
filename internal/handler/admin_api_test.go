@@ -39,6 +39,45 @@ func TestAdminConfigFromConfigDoesNotExposeSecrets(t *testing.T) {
 	}
 }
 
+func TestValidateAdminStorageSourcesAcceptsExistingS3Secret(t *testing.T) {
+	existing := []config.StorageSourceConfig{{ID: "s3-main", Type: "s3", S3AccessKeySecret: "old-secret"}}
+	payloads := []adminStorageSourcePayload{
+		{ID: "local", Name: "本地存储", Type: "local", Enabled: true},
+		{
+			ID:            "s3-main",
+			Name:          "S3 主源",
+			Type:          "s3",
+			Enabled:       true,
+			S3Bucket:      "images",
+			S3AccessKeyID: "access-key",
+		},
+	}
+
+	if err := validateAdminStorageSources(existing, payloads, "s3-main"); err != nil {
+		t.Fatalf("validateAdminStorageSources() error = %v", err)
+	}
+
+	merged := mergeAdminStorageSources(existing, payloads)
+	if len(merged) != 2 {
+		t.Fatalf("merged length = %d, want 2", len(merged))
+	}
+	if merged[1].S3AccessKeySecret != "old-secret" {
+		t.Fatalf("S3AccessKeySecret = %q, want preserved secret", merged[1].S3AccessKeySecret)
+	}
+}
+
+func TestValidateAdminStorageSourcesRejectsInvalidDefault(t *testing.T) {
+	payloads := []adminStorageSourcePayload{
+		{ID: "local", Name: "本地存储", Type: "local", Enabled: true},
+		{ID: "s3-main", Name: "S3 主源", Type: "s3", Enabled: false},
+	}
+
+	err := validateAdminStorageSources(nil, payloads, "s3-main")
+	if err == nil || !strings.Contains(err.Error(), "默认上传源") {
+		t.Fatalf("validateAdminStorageSources() error = %v, want invalid default error", err)
+	}
+}
+
 func TestAdminSiteIconUploadRejectsUnsafeSVG(t *testing.T) {
 	tmp := t.TempDir()
 	oldWd, err := os.Getwd()

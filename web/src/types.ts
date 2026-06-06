@@ -122,7 +122,7 @@ export interface StorageSourceConfig {
   s3_bucket: string
   s3_prefix: string
   s3_access_key_id: string
-  s3_access_key_secret: string
+  s3_access_key_secret?: string
   s3_force_path_style: boolean
   s3_secret_set?: boolean
 }
