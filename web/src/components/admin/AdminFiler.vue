@@ -21,21 +21,27 @@ const breadcrumbs = computed(() => {
   })
 })
 
+const dirs = computed(() => data.value?.dirs ?? [])
+const files = computed(() => data.value?.files ?? [])
+
 const filteredFiles = computed(() => {
-  const files = data.value?.files || []
+  const currentFiles = files.value
   const query = queryInput.value.trim().toLowerCase()
-  if (!query) return files
-  return files.filter(file => [file.name, file.original_name, file.path, file.url, file.ext].some(value => value?.toLowerCase().includes(query)))
+  if (!query) return currentFiles
+  return currentFiles.filter(file => [file.name, file.original_name, file.path, file.url, file.ext].some(value => value?.toLowerCase().includes(query)))
 })
 
-const totalItems = computed(() => (data.value?.dirs.length || 0) + (data.value?.files.length || 0))
+const totalItems = computed(() => dirs.value.length + files.value.length)
 
 async function load(path?: string) {
   loading.value = true
   const params = new URLSearchParams()
   if (path) params.set('path', path)
   try {
-    data.value = await adminApi.filer(params)
+    const payload = await adminApi.filer(params)
+    payload.dirs = payload.dirs ?? []
+    payload.files = payload.files ?? []
+    data.value = payload
     queryInput.value = ''
   } catch (error) {
     emit('notice', error instanceof Error ? error.message : '加载失败', 'danger')
@@ -48,7 +54,7 @@ async function remove(file: AdminFileEntry) {
   if (!window.confirm('确认删除此文件？')) return
   const result = await adminApi.deleteFile(file.path)
   if (result.code === 200 && data.value) {
-    data.value.files = data.value.files.filter(item => item.url !== file.url)
+    data.value.files = files.value.filter(item => item.url !== file.url)
     if (selectedImage.value?.url === file.url) selectedImage.value = null
     emit('notice', result.msg || '删除成功', 'success')
   } else {
@@ -85,8 +91,8 @@ onMounted(() => load())
         <p :title="data.path">{{ data.path }}</p>
       </div>
       <div class="filer-stats" aria-label="当前目录概览">
-        <span><strong>{{ data.dirs.length }}</strong> 目录</span>
-        <span><strong>{{ data.files.length }}</strong> 文件</span>
+        <span><strong>{{ dirs.length }}</strong> 目录</span>
+        <span><strong>{{ files.length }}</strong> 文件</span>
         <span><strong>{{ totalItems }}</strong> 项目</span>
       </div>
     </header>
@@ -106,10 +112,10 @@ onMounted(() => load())
       <aside class="filer-sidebar" aria-label="子目录">
         <div class="section-heading">
           <span>子目录</span>
-          <strong>{{ data.dirs.length }}</strong>
+          <strong>{{ dirs.length }}</strong>
         </div>
-        <div v-if="data.dirs.length" class="dir-list">
-          <button v-for="dir in data.dirs" :key="dir" class="dir-row" @click="openDir(dir)">
+        <div v-if="dirs.length" class="dir-list">
+          <button v-for="dir in dirs" :key="dir" class="dir-row" @click="openDir(dir)">
             <span class="folder-icon"><i class="icon icon-folder-close"></i></span>
             <span class="dir-name" :title="dir">{{ dir }}</span>
           </button>
@@ -122,7 +128,7 @@ onMounted(() => load())
           <div>
             <div class="section-heading inline">
               <span>文件</span>
-              <strong>{{ filteredFiles.length }} / {{ data.files.length }}</strong>
+              <strong>{{ filteredFiles.length }} / {{ files.length }}</strong>
             </div>
             <p class="table-hint">缩略图、源文件名、存储路径、大小、格式和修改时间集中显示。</p>
           </div>
@@ -175,8 +181,8 @@ onMounted(() => load())
         </div>
         <div v-else class="empty-state">
           <i class="icon icon-inbox"></i>
-          <strong>{{ data.files.length ? '没有匹配的文件' : '当前目录没有文件' }}</strong>
-          <span>{{ data.files.length ? '换个关键词继续过滤当前目录。' : '可从左侧目录继续深入浏览。' }}</span>
+          <strong>{{ files.length ? '没有匹配的文件' : '当前目录没有文件' }}</strong>
+          <span>{{ files.length ? '换个关键词继续过滤当前目录。' : '可从左侧目录继续深入浏览。' }}</span>
         </div>
       </main>
     </div>

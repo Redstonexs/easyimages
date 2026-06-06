@@ -616,6 +616,9 @@ func adminFilerPayload(c *gin.Context, cfg *config.Config) (adminFilerData, erro
 	}
 
 	dirs := service.GetDirList("." + reqPath)
+	if dirs == nil {
+		dirs = []string{}
+	}
 	files := service.GetFileList("."+reqPath+"*.*", cfg.ShowSort)
 	parentPath := ""
 	if reqPath != cfg.Path {

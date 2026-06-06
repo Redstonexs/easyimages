@@ -176,6 +176,48 @@ func TestAdminURLListPayloadUsesThumbnails(t *testing.T) {
 	}
 }
 
+func TestAdminFilerPayloadReturnsEmptyDirsForLeafDirectory(t *testing.T) {
+	tmp := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+
+	leafDir := filepath.Join("i", "2026", "06", "05")
+	if err := os.MkdirAll(leafDir, 0755); err != nil {
+		t.Fatalf("create leaf dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(leafDir, "leaf.jpg"), []byte("x"), 0644); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/admin/api/filer?path=/i/2026/06/05/", nil)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = req
+
+	payload, err := adminFilerPayload(c, &config.Config{Path: "/i/", Domain: "https://img.example.com"})
+	if err != nil {
+		t.Fatalf("adminFilerPayload() error = %v", err)
+	}
+	if payload.Dirs == nil {
+		t.Fatal("Dirs is nil, want empty slice")
+	}
+	if len(payload.Dirs) != 0 {
+		t.Fatalf("Dirs length = %d, want 0", len(payload.Dirs))
+	}
+	if len(payload.Files) != 1 {
+		t.Fatalf("Files length = %d, want 1", len(payload.Files))
+	}
+}
+
 func TestAdminURLListPayloadSearchesOriginalFileName(t *testing.T) {
 	tmp := t.TempDir()
 	oldWd, err := os.Getwd()
