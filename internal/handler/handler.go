@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +20,11 @@ import (
 
 func Index(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if cfg.MustLogin == 1 && !service.IsLoggedIn(c) {
+			c.Redirect(http.StatusFound, loginRedirectURL(c))
+			return
+		}
+
 		// 检查登录状态
 		isAdmin := service.IsAdmin(c)
 
@@ -47,6 +53,10 @@ func Index(cfg *config.Config) gin.HandlerFunc {
 		}
 		c.HTML(http.StatusOK, "index.html", data)
 	}
+}
+
+func loginRedirectURL(c *gin.Context) string {
+	return "/admin/index?redirect=" + url.QueryEscape(c.Request.URL.RequestURI())
 }
 
 func defaultPublicStorageSource(cfg *config.Config) string {
@@ -847,27 +857,32 @@ func InstallAction(cfg *config.Config) gin.HandlerFunc {
 
 func AdminIndex(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		redirect := safeLoginRedirect(c.Query("redirect"), "/admin/manager")
 		if service.IsAdmin(c) {
-			c.Redirect(http.StatusFound, "/admin/manager")
+			c.Redirect(http.StatusFound, redirect)
 			return
 		}
 
 		captchaData := service.GenerateCaptcha(cfg)
 		c.HTML(http.StatusOK, "admin_login.html", gin.H{
-			"config":  cfg,
-			"captcha": captchaData,
+			"config":   cfg,
+			"captcha":  captchaData,
+			"redirect": redirect,
 		})
 	}
 }
 
 func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		redirect := safeLoginRedirect(c.PostForm("redirect"), "/admin/manager")
+
 		// 检查登录速率限制
 		clientIP := c.ClientIP()
 		if !service.CheckLoginRateLimit(clientIP) {
 			c.HTML(http.StatusTooManyRequests, "admin_login.html", gin.H{
-				"config": cfg,
-				"error":  "登录尝试过于频繁，请5分钟后再试",
+				"config":   cfg,
+				"error":    "登录尝试过于频繁，请5分钟后再试",
+				"redirect": redirect,
 			})
 			return
 		}
@@ -888,9 +903,10 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 				log.Printf("[Login page] captcha=%d, captcha_type=%d, captcha_data_type=%s, question=%q",
 					cfg.Captcha, cfg.CaptchaType, captchaData.Type, captchaData.Question)
 				c.HTML(http.StatusOK, "admin_login.html", gin.H{
-					"config":  cfg,
-					"error":   msg,
-					"captcha": captchaData,
+					"config":   cfg,
+					"error":    msg,
+					"captcha":  captchaData,
+					"redirect": redirect,
 				})
 				return
 			}
@@ -903,18 +919,30 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 		if success {
 			service.ResetLoginAttempts(clientIP)
 			service.SetAdminSession(c, user)
-			c.Redirect(http.StatusFound, "/admin/manager")
+			c.Redirect(http.StatusFound, redirect)
 			return
 		}
 
 		service.RecordFailedLogin(clientIP)
 		captchaData := service.GenerateCaptcha(cfg)
 		c.HTML(http.StatusOK, "admin_login.html", gin.H{
-			"config":  cfg,
-			"error":   message,
-			"captcha": captchaData,
+			"config":   cfg,
+			"error":    message,
+			"captcha":  captchaData,
+			"redirect": redirect,
 		})
 	}
+}
+
+func safeLoginRedirect(raw, fallback string) string {
+	redirect := strings.TrimSpace(raw)
+	if redirect == "" {
+		return fallback
+	}
+	if !strings.HasPrefix(redirect, "/") || strings.HasPrefix(redirect, "//") || strings.Contains(redirect, "\\") {
+		return fallback
+	}
+	return redirect
 }
 
 func Manager(cfg *config.Config) gin.HandlerFunc {

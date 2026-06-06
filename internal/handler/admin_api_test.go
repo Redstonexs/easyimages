@@ -39,6 +39,45 @@ func TestAdminConfigFromConfigDoesNotExposeSecrets(t *testing.T) {
 	}
 }
 
+func TestIndexRedirectsAnonymousToLoginWhenPrivateModeEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", Index(&config.Config{MustLogin: 1}))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusFound)
+	}
+	if location := w.Header().Get("Location"); location != "/admin/index?redirect=%2F" {
+		t.Fatalf("Location = %q, want login redirect", location)
+	}
+}
+
+func TestSafeLoginRedirectRejectsExternalTargets(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty", raw: "", want: "/admin/manager"},
+		{name: "relative", raw: "/", want: "/"},
+		{name: "absolute url", raw: "https://evil.example/", want: "/admin/manager"},
+		{name: "scheme relative", raw: "//evil.example/", want: "/admin/manager"},
+		{name: "backslash", raw: "/\\evil", want: "/admin/manager"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := safeLoginRedirect(tt.raw, "/admin/manager"); got != tt.want {
+				t.Fatalf("safeLoginRedirect(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateAdminStorageSourcesAcceptsExistingS3Secret(t *testing.T) {
 	existing := []config.StorageSourceConfig{{ID: "s3-main", Type: "s3", S3AccessKeySecret: "old-secret"}}
 	payloads := []adminStorageSourcePayload{
