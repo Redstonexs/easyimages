@@ -103,6 +103,25 @@ func TestChunkUploadLocalMergeRejectsMissingPart(t *testing.T) {
 	}
 }
 
+func TestChunkUploadRejectsExcessiveTotalChunks(t *testing.T) {
+	chdirTemp(t)
+	cfg := chunkTestConfig()
+	r := chunkTestRouter(cfg)
+
+	w := performChunkRequest(t, r, map[string]string{
+		"uploadId":       "too-many-parts",
+		"totalChunks":    fmt.Sprintf("%d", maxChunkUploadParts+1),
+		"filename":       "sample.txt",
+		"storage_source": "local",
+	}, nil)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), fmt.Sprintf("%d", maxChunkUploadParts)) {
+		t.Fatalf("response = %s, want max chunk limit", w.Body.String())
+	}
+}
+
 func TestS3ChunkUploadUploadsPartsConcurrently(t *testing.T) {
 	chdirTemp(t)
 	cfg := chunkTestConfig()

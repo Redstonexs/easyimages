@@ -18,6 +18,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const maxChunkUploadParts = 10000
+
 func Index(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if cfg.MustLogin == 1 && !service.IsLoggedIn(c) {
@@ -268,6 +270,13 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"result": "failed", "code": 400, "message": "无效的分片总数"})
 			return
 		}
+		if totalChunks > maxChunkUploadParts {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"result": "failed", "code": 400,
+				"message": fmt.Sprintf("分片总数超过限制，最多允许 %d 个分片", maxChunkUploadParts),
+			})
+			return
+		}
 
 		// chunkIndex 仅在非 merge 请求时需要
 		var chunkIndex int
@@ -340,7 +349,6 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 
 		// === 合并所有分片 ===
 		mergeStarted := time.Now()
-		partPaths := make([]string, totalChunks)
 		var totalSize int64
 		for i := 0; i < totalChunks; i++ {
 			partPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", i))
@@ -357,7 +365,6 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 				return
 			}
 			totalSize += info.Size()
-			partPaths[i] = partPath
 		}
 		if totalSize > cfg.MaxSize {
 			os.RemoveAll(chunkDir)
@@ -398,7 +405,8 @@ func ChunkUpload(cfg *config.Config) gin.HandlerFunc {
 		}
 		buf := make([]byte, 1024*1024)
 		for i := 0; i < totalChunks; i++ {
-			partFile, err := os.Open(partPaths[i])
+			partPath := filepath.Join(chunkDir, fmt.Sprintf("%06d", i))
+			partFile, err := os.Open(partPath)
 			if err != nil {
 				outFile.Close()
 				os.Remove(finalPath)
