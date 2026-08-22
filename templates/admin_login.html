@@ -47,6 +47,9 @@
     <link rel="preconnect" href="https://www.google.com" crossorigin>
     <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
     <link rel="preload" href="https://www.google.com/recaptcha/api.js" as="script" crossorigin>
+    {{else if eq .captcha.Type "cap"}}
+    {{if .captcha.WasmURL}}<script>window.CAP_CUSTOM_WASM_URL = "{{.captcha.WasmURL}}";</script>{{end}}
+    <script src="{{.captcha.WidgetURL}}" defer></script>
     {{end}}
     {{end}}
 </head>
@@ -110,6 +113,10 @@
                         })();
                     });
                     </script>
+                    {{else if eq .captcha.Type "cap"}}
+                    <!-- Inside a <form> the widget injects its own hidden
+                         "cap-token" input, so no glue JavaScript is needed. -->
+                    <cap-widget data-cap-api-endpoint="{{.captcha.APIEndpoint}}"></cap-widget>
                     {{end}}
                 </div>
                 {{end}}

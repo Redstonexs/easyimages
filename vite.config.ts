@@ -6,7 +6,15 @@ export default defineConfig({
   base: '/public/dist/',
   publicDir: false,
   plugins: [
-    vue(),
+    // <cap-widget> is a custom element defined by the Cap widget script, not a
+    // Vue component. Without this the compiler tries to resolve it and fails.
+    vue({
+      template: {
+        compilerOptions: {
+          isCustomElement: tag => tag === 'cap-widget'
+        }
+      }
+    }),
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: false,

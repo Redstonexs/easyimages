@@ -1,8 +1,19 @@
 export interface CaptchaData {
-  type: 'disabled' | 'builtin' | 'turnstile' | 'recaptcha'
+  type: 'disabled' | 'builtin' | 'turnstile' | 'recaptcha' | 'cap'
   question?: string
   token?: string
   site_key?: string
+  /** Cap only: instance URL + site key, trailing slash included. */
+  api_endpoint?: string
+  /** Cap only: where to load the widget script from. */
+  widget_url?: string
+  /** Cap only: overrides the widget's default (CDN) WASM source. */
+  wasm_url?: string
+}
+
+/** The <cap-widget> custom element, as far as this app uses it. */
+export interface CapWidgetElement extends HTMLElement {
+  reset: () => void
 }
 
 export interface SiteConfig {
@@ -111,6 +122,10 @@ export interface AdminConfig {
   captcha_type: number
   turnstile_site_key: string
   recaptcha_site_key: string
+  cap_instance_url: string
+  cap_site_key: string
+  cap_widget_url: string
+  cap_secret_key?: string
   hotlink_protect: number
   hotlink_domains: string
   mime: string
@@ -121,6 +136,7 @@ export interface AdminConfig {
   storage_sources: StorageSourceConfig[]
   turnstile_secret_set: boolean
   recaptcha_secret_set: boolean
+  cap_secret_set: boolean
 }
 
 export interface StorageSourceConfig {

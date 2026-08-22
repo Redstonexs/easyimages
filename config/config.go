@@ -45,6 +45,10 @@ type Config struct {
 	TurnstileSecretKey   string                `json:"turnstile_secret_key"`
 	RecaptchaSiteKey     string                `json:"recaptcha_site_key"`
 	RecaptchaSecretKey   string                `json:"recaptcha_secret_key"`
+	CapInstanceURL       string                `json:"cap_instance_url"`
+	CapSiteKey           string                `json:"cap_site_key"`
+	CapSecretKey         string                `json:"cap_secret_key"`
+	CapWidgetURL         string                `json:"cap_widget_url"`
 	MustLogin            int                   `json:"mustLogin"`
 	APIStatus            int                   `json:"apiStatus"`
 	Path                 string                `json:"path"`
@@ -392,6 +396,9 @@ func setDefaults(cfg *Config) {
 		}
 		if cfg.CaptchaType == 2 && (cfg.RecaptchaSiteKey == "" || cfg.RecaptchaSecretKey == "") {
 			cfg.CaptchaType = 0 // reCAPTCHA 密钥未配置，回退到内置
+		}
+		if cfg.CaptchaType == 3 && (cfg.CapInstanceURL == "" || cfg.CapSiteKey == "" || cfg.CapSecretKey == "") {
+			cfg.CaptchaType = 0 // Cap 实例地址或密钥未配置，回退到内置
 		}
 	}
 	if cfg.Port == 0 {

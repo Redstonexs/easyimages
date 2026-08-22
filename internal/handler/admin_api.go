@@ -52,6 +52,10 @@ type adminConfigPayload struct {
 	CaptchaType          int                         `json:"captcha_type"`
 	TurnstileSiteKey     string                      `json:"turnstile_site_key"`
 	RecaptchaSiteKey     string                      `json:"recaptcha_site_key"`
+	CapInstanceURL       string                      `json:"cap_instance_url"`
+	CapSiteKey           string                      `json:"cap_site_key"`
+	CapWidgetURL         string                      `json:"cap_widget_url"`
+	CapSecretKey         string                      `json:"cap_secret_key,omitempty"`
 	HotlinkProtect       int                         `json:"hotlink_protect"`
 	HotlinkDomains       string                      `json:"hotlink_domains"`
 	Mime                 string                      `json:"mime"`
@@ -62,6 +66,7 @@ type adminConfigPayload struct {
 	StorageSources       []adminStorageSourcePayload `json:"storage_sources"`
 	TurnstileSecretSet   bool                        `json:"turnstile_secret_set"`
 	RecaptchaSecretSet   bool                        `json:"recaptcha_secret_set"`
+	CapSecretSet         bool                        `json:"cap_secret_set"`
 }
 
 type adminStorageSourcePayload struct {
@@ -369,6 +374,9 @@ func adminConfigFromConfig(cfg *config.Config) adminConfigPayload {
 		CaptchaType:          cfg.CaptchaType,
 		TurnstileSiteKey:     cfg.TurnstileSiteKey,
 		RecaptchaSiteKey:     cfg.RecaptchaSiteKey,
+		CapInstanceURL:       cfg.CapInstanceURL,
+		CapSiteKey:           cfg.CapSiteKey,
+		CapWidgetURL:         cfg.CapWidgetURL,
 		HotlinkProtect:       cfg.HotlinkProtect,
 		HotlinkDomains:       cfg.HotlinkDomains,
 		Mime:                 cfg.Mime,
@@ -379,6 +387,7 @@ func adminConfigFromConfig(cfg *config.Config) adminConfigPayload {
 		StorageSources:       adminStorageSourcesFromConfig(cfg),
 		TurnstileSecretSet:   cfg.TurnstileSecretKey != "",
 		RecaptchaSecretSet:   cfg.RecaptchaSecretKey != "",
+		CapSecretSet:         cfg.CapSecretKey != "",
 	}
 }
 
@@ -434,6 +443,15 @@ func applyAdminConfigPayload(cfg *config.Config, req adminConfigPayload) {
 	}
 	if req.RecaptchaSiteKey != "" {
 		cfg.RecaptchaSiteKey = req.RecaptchaSiteKey
+	}
+	// Instance URL, widget URL and site key round-trip to the admin form, so an
+	// empty value is a deliberate clear. The secret key is write-only — it is never
+	// echoed back to the browser — so empty there means "keep the stored one".
+	cfg.CapInstanceURL = strings.TrimSpace(req.CapInstanceURL)
+	cfg.CapSiteKey = strings.TrimSpace(req.CapSiteKey)
+	cfg.CapWidgetURL = strings.TrimSpace(req.CapWidgetURL)
+	if req.CapSecretKey != "" {
+		cfg.CapSecretKey = strings.TrimSpace(req.CapSecretKey)
 	}
 	if req.Mime != "" {
 		cfg.Mime = req.Mime

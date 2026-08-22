@@ -19,6 +19,9 @@
     <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
     <link rel="preload" href="https://www.google.com/recaptcha/api.js" as="script" crossorigin>
     <script src="https://www.google.com/recaptcha/api.js?render={{.captcha.SiteKey}}" async defer></script>
+    {{else if eq .captcha.Type "cap"}}
+    {{if .captcha.WasmURL}}<script>window.CAP_CUSTOM_WASM_URL = "{{.captcha.WasmURL}}";</script>{{end}}
+    <script src="{{.captcha.WidgetURL}}" defer></script>
     {{end}}
     {{end}}
     {{vite "web/src/entries/upload.ts"}}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -23,7 +24,13 @@ const (
 	CaptchaTypeBuiltin   = 0
 	CaptchaTypeTurnstile = 1
 	CaptchaTypeRecaptcha = 2
+	CaptchaTypeCap       = 3
 )
+
+// captchaHTTPClient is used for every server-to-server captcha verification.
+// A bounded timeout matters here: these calls sit directly in the login request
+// path, so an unresponsive verifier must fail rather than pin the handler.
+var captchaHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 const (
 	captchaTokenExpiry = 5 * time.Minute
@@ -32,17 +39,60 @@ const (
 
 // CaptchaData captcha generation response
 type CaptchaData struct {
-	Type    string `json:"type"`
+	Type     string `json:"type"`
 	Question string `json:"question,omitempty"`
-	Token   string `json:"token,omitempty"`
-	SiteKey string `json:"site_key,omitempty"`
+	Token    string `json:"token,omitempty"`
+	SiteKey  string `json:"site_key,omitempty"`
+	// APIEndpoint is the Cap widget endpoint (instance URL + site key, trailing slash).
+	APIEndpoint string `json:"api_endpoint,omitempty"`
+	// WidgetURL is the <script> source for the Cap widget.
+	WidgetURL string `json:"widget_url,omitempty"`
+	// WasmURL overrides where the widget fetches its proof-of-work WASM from.
+	// Empty means "use the widget's own default", which is a public CDN.
+	WasmURL string `json:"wasm_url,omitempty"`
+}
+
+// capAPIEndpoint builds the widget/verify base URL for a Cap Standalone instance.
+// The trailing slash is mandatory — the widget appends "challenge"/"redeem" to it
+// and the server appends "siteverify" — so it is normalized here rather than
+// relying on the operator typing it correctly in the admin form.
+func capAPIEndpoint(cfg *config.Config) string {
+	return strings.TrimRight(cfg.CapInstanceURL, "/") + "/" + cfg.CapSiteKey + "/"
+}
+
+// capAssetURLs resolves where the browser loads the Cap widget and its WASM from.
+//
+// By default both come from the operator's own Cap instance, which serves them
+// under /assets/ when the container has ENABLE_ASSETS_SERVER=true. That keeps
+// visitors talking only to infrastructure the operator controls — the whole
+// reason to pick a self-hosted captcha. Note the widget's WASM is a separate
+// fetch that also defaults to a public CDN, so it has to be redirected too.
+//
+// Operators who cannot enable the asset server can point CapWidgetURL at a CDN
+// build or a copy served from /public/static/; in that case the widget keeps its
+// own default WASM source, since a CDN build expects the matching CDN WASM.
+func capAssetURLs(cfg *config.Config) (widgetURL, wasmURL string) {
+	if custom := strings.TrimSpace(cfg.CapWidgetURL); custom != "" {
+		return custom, ""
+	}
+	base := strings.TrimRight(cfg.CapInstanceURL, "/")
+	return base + "/assets/widget.js", base + "/assets/cap_wasm_bg.wasm"
+}
+
+// capConfigured reports whether Cap has everything it needs to run.
+func capConfigured(cfg *config.Config) bool {
+	return cfg.CapInstanceURL != "" && cfg.CapSiteKey != "" && cfg.CapSecretKey != ""
 }
 
 // generateCaptchaHMACKey derives a key from config password using HKDF-SHA256.
 // HKDF (RFC 5869) is a proper KDF designed for key derivation from a shared secret.
 func generateCaptchaHMACKey() []byte {
-	cfg := config.Get()
-	secret := cfg.Password
+	secret := ""
+	// config.Get() returns nil until the config has been loaded. Fall back to the
+	// constant rather than panicking — the empty-password path already does.
+	if cfg := config.Get(); cfg != nil {
+		secret = cfg.Password
+	}
 	if secret == "" {
 		secret = captchaHMACKey
 	}
@@ -87,6 +137,19 @@ func GenerateCaptcha(cfg *config.Config) CaptchaData {
 		return CaptchaData{
 			Type:    "recaptcha",
 			SiteKey: cfg.RecaptchaSiteKey,
+		}
+	case CaptchaTypeCap:
+		if !capConfigured(cfg) {
+			// 实例地址或密钥未配置，回退到内置验证码
+			return generateBuiltinCaptcha()
+		}
+		widgetURL, wasmURL := capAssetURLs(cfg)
+		return CaptchaData{
+			Type:        "cap",
+			SiteKey:     cfg.CapSiteKey,
+			APIEndpoint: capAPIEndpoint(cfg),
+			WidgetURL:   widgetURL,
+			WasmURL:     wasmURL,
 		}
 	default:
 		return generateBuiltinCaptcha()
@@ -135,7 +198,7 @@ func signCaptchaAnswer(answer int) (string, error) {
 }
 
 // VerifyCaptcha verifies the captcha response
-func VerifyCaptcha(cfg *config.Config, captchaAnswer, captchaToken, turnstileResponse, recaptchaResponse string) (bool, string) {
+func VerifyCaptcha(cfg *config.Config, captchaAnswer, captchaToken, turnstileResponse, recaptchaResponse, capResponse string) (bool, string) {
 	if cfg.Captcha == 0 {
 		return true, ""
 	}
@@ -151,6 +214,11 @@ func VerifyCaptcha(cfg *config.Config, captchaAnswer, captchaToken, turnstileRes
 			return verifyBuiltinCaptcha(captchaAnswer, captchaToken)
 		}
 		return verifyRecaptcha(cfg.RecaptchaSecretKey, recaptchaResponse)
+	case CaptchaTypeCap:
+		if !capConfigured(cfg) {
+			return verifyBuiltinCaptcha(captchaAnswer, captchaToken)
+		}
+		return verifyCap(cfg, capResponse)
 	default:
 		return verifyBuiltinCaptcha(captchaAnswer, captchaToken)
 	}
@@ -218,7 +286,7 @@ func verifyTurnstile(secretKey, token string) (bool, string) {
 	form.Set("secret", secretKey)
 	form.Set("response", token)
 
-	resp, err := http.PostForm("https://challenges.cloudflare.com/turnstile/v0/siteverify", form)
+	resp, err := captchaHTTPClient.PostForm("https://challenges.cloudflare.com/turnstile/v0/siteverify", form)
 	if err != nil {
 		log.Printf("[Captcha] Turnstile verification request failed: %v", err)
 		return false, "人机验证服务请求失败"
@@ -259,7 +327,7 @@ func verifyRecaptcha(secretKey, token string) (bool, string) {
 	form.Set("secret", secretKey)
 	form.Set("response", token)
 
-	resp, err := http.PostForm("https://www.google.com/recaptcha/api/siteverify", form)
+	resp, err := captchaHTTPClient.PostForm("https://www.google.com/recaptcha/api/siteverify", form)
 	if err != nil {
 		log.Printf("[Captcha] reCAPTCHA verification request failed: %v", err)
 		return false, "人机验证服务请求失败"
@@ -281,6 +349,72 @@ func verifyRecaptcha(secretKey, token string) (bool, string) {
 	}
 
 	if !result.Success {
+		return false, "人机验证失败，请重试"
+	}
+
+	return true, ""
+}
+
+// verifyCap verifies a Cap token against a self-hosted Cap Standalone instance.
+//
+// The contract is deliberately reCAPTCHA-shaped: POST {secret, response} to
+// <instance>/<siteKey>/siteverify and read back {success}. Cap tokens are
+// single-use — the instance deletes the token on verification — so this must be
+// called exactly once per login attempt, before any side effect.
+//
+// Every failure path returns false (fail closed). A verifier that cannot be
+// reached must reject the login, never wave it through.
+func verifyCap(cfg *config.Config, token string) (bool, string) {
+	if !capConfigured(cfg) {
+		return false, "Cap 未配置实例地址或密钥"
+	}
+	if token == "" {
+		return false, "请完成人机验证"
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"secret":   cfg.CapSecretKey,
+		"response": token,
+	})
+	if err != nil {
+		log.Printf("[Captcha] Failed to encode Cap request: %v", err)
+		return false, "人机验证服务请求失败"
+	}
+
+	endpoint := capAPIEndpoint(cfg) + "siteverify"
+	resp, err := captchaHTTPClient.Post(endpoint, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("[Captcha] Cap verification request failed: %v", err)
+		return false, "人机验证服务请求失败"
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		log.Printf("[Captcha] Failed to read Cap response: %v", err)
+		return false, "人机验证服务响应读取失败"
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		// A 401 here almost always means the admin key was pasted where the
+		// secret key (sk-...) belongs.
+		log.Printf("[Captcha] Cap verification returned HTTP %d", resp.StatusCode)
+		return false, "人机验证服务响应异常"
+	}
+
+	var result struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Printf("[Captcha] Failed to parse Cap response: %v", err)
+		return false, "人机验证服务响应解析失败"
+	}
+
+	if !result.Success {
+		if result.Error != "" {
+			log.Printf("[Captcha] Cap rejected token: %s", result.Error)
+		}
 		return false, "人机验证失败，请重试"
 	}
 

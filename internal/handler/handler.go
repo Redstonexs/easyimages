@@ -118,6 +118,7 @@ func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 				c.PostForm("captcha_token"),
 				c.PostForm("cf_turnstile_response"),
 				c.PostForm("g_recaptcha_response"),
+				c.PostForm("cap-token"),
 			)
 			if !ok {
 				c.JSON(http.StatusBadRequest, gin.H{
@@ -928,6 +929,7 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 				c.PostForm("captcha_token"),
 				c.PostForm("cf_turnstile_response"),
 				c.PostForm("g_recaptcha_response"),
+				c.PostForm("cap-token"),
 			)
 			if !ok {
 				captchaData := service.GenerateCaptcha(cfg)
@@ -1123,6 +1125,18 @@ func ManagerAction(cfg *config.Config) gin.HandlerFunc {
 			}
 			if v := c.PostForm("recaptcha_secret_key"); v != "" {
 				cfg.RecaptchaSecretKey = v
+			}
+			if v := c.PostForm("cap_instance_url"); v != "" {
+				cfg.CapInstanceURL = v
+			}
+			if v := c.PostForm("cap_site_key"); v != "" {
+				cfg.CapSiteKey = v
+			}
+			if v := c.PostForm("cap_secret_key"); v != "" {
+				cfg.CapSecretKey = v
+			}
+			if v := c.PostForm("cap_widget_url"); v != "" {
+				cfg.CapWidgetURL = v
 			}
 			if v := c.PostForm("hotlink_protect"); v != "" {
 				if n, err := strconv.Atoi(v); err == nil {

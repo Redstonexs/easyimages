@@ -199,11 +199,20 @@ onMounted(load)
             <h4>安全</h4>
             <div class="form-row">
               <label>登录验证码<select v-model.number="config.captcha" class="form-control"><option :value="0">关闭</option><option :value="1">开启</option></select></label>
-              <label v-if="config.captcha === 1">验证码类型<select v-model.number="config.captcha_type" class="form-control"><option :value="0">内置数学题</option><option :value="1">Turnstile</option><option :value="2">reCAPTCHA</option></select></label>
+              <label v-if="config.captcha === 1">验证码类型<select v-model.number="config.captcha_type" class="form-control"><option :value="0">内置数学题</option><option :value="1">Turnstile</option><option :value="2">reCAPTCHA</option><option :value="3">Cap（自托管）</option></select></label>
               <label v-if="config.captcha_type === 1">Turnstile Site Key<input v-model="config.turnstile_site_key" class="form-control"></label>
               <label v-if="config.captcha_type === 2">reCAPTCHA Site Key<input v-model="config.recaptcha_site_key" class="form-control"></label>
+              <label v-if="config.captcha === 1 && config.captcha_type === 3">Cap 实例地址<input v-model="config.cap_instance_url" class="form-control" placeholder="https://cap.example.com"></label>
+              <label v-if="config.captcha === 1 && config.captcha_type === 3">Cap Site Key<input v-model="config.cap_site_key" class="form-control" placeholder="公开，10 位十六进制"></label>
+              <label v-if="config.captcha === 1 && config.captcha_type === 3">Cap Secret Key<input v-model="config.cap_secret_key" type="password" class="form-control" autocomplete="new-password" :placeholder="config.cap_secret_set ? '已配置，留空则保持不变' : 'sk- 开头，仅服务端使用'"></label>
+              <label v-if="config.captcha === 1 && config.captcha_type === 3">Cap 组件地址（可选）<input v-model="config.cap_widget_url" class="form-control" placeholder="留空则使用实例自带的 /assets/widget.js"></label>
               <label>防盗链<select v-model.number="config.hotlink_protect" class="form-control"><option :value="0">关闭</option><option :value="1">开启</option></select></label>
             </div>
+            <p v-if="config.captcha === 1 && config.captcha_type === 3" class="help-block">
+              Cap 需要一个自托管的 Cap Standalone 实例（Docker + Redis/Valkey）。Secret Key 只在保存时上传，不会回传到浏览器。
+              留空「组件地址」时会从实例的 <code>/assets/widget.js</code> 加载前端组件，需要在容器上设置 <code>ENABLE_ASSETS_SERVER=true</code>；
+              否则请填写一个可访问的组件地址（例如 CDN 或自行托管的副本）。
+            </p>
             <label v-if="config.hotlink_protect === 1">白名单域名<textarea v-model="config.hotlink_domains" class="form-control" rows="4"></textarea></label>
           </div>
 

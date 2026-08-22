@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import type { CaptchaData, ProgressItem, UploadBootstrap, UploadResult } from '../types'
+import type { CapWidgetElement, CaptchaData, ProgressItem, UploadBootstrap, UploadResult } from '../types'
 import { fetchJSON } from '../shared/api'
 import { extractImageFiles, isTextEntryTarget } from '../shared/clipboardFiles'
 import { createSemaphore } from '../shared/concurrency'
@@ -54,6 +54,7 @@ const captcha = ref<CaptchaData>(props.bootstrap.captcha)
 const captchaAnswer = ref('')
 const externalCaptchaToken = ref('')
 const turnstileRendered = ref(false)
+const capWidget = ref<CapWidgetElement | null>(null)
 
 const { notices, notify } = useNotices()
 const copy = useCopy(notify)
@@ -431,6 +432,18 @@ async function refreshCaptcha() {
   captchaAnswer.value = ''
 }
 
+// The Cap widget renders and solves itself once it is in the DOM; all we do is
+// collect the token it emits.
+function handleCapSolve(event: Event) {
+  externalCaptchaToken.value = (event as CustomEvent<{ token?: string }>).detail?.token || ''
+}
+
+function handleCapError(event: Event) {
+  externalCaptchaToken.value = ''
+  const detail = (event as CustomEvent<{ message?: string }>).detail
+  loginError.value = detail?.message || '人机验证加载失败，请刷新页面重试'
+}
+
 function renderCaptcha() {
   if (captcha.value.type === 'turnstile' && captcha.value.site_key) {
     const render = () => {
@@ -486,6 +499,9 @@ async function login() {
     body.set('cf_turnstile_response', externalCaptchaToken.value)
   } else if (captcha.value.type === 'recaptcha') {
     body.set('g_recaptcha_response', externalCaptchaToken.value)
+  } else if (captcha.value.type === 'cap') {
+    // Matches the hidden input the widget injects inside a plain <form>.
+    body.set('cap-token', externalCaptchaToken.value)
   }
 
   try {
@@ -495,10 +511,25 @@ async function login() {
       body
     })
     if (result.result === 'success') window.location.href = '/admin/manager'
-    else loginError.value = result.message || '登录失败'
+    else {
+      loginError.value = result.message || '登录失败'
+      resetCaptchaAfterFailure()
+    }
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : '登录失败'
-    if (captcha.value.type === 'builtin') void refreshCaptcha().catch(() => undefined)
+    resetCaptchaAfterFailure()
+  }
+}
+
+// Every captcha here is single-use: the builtin token is consumed by answering,
+// and Cap's instance deletes the token during /siteverify. After a failed login
+// the old token is worthless, so issue a fresh challenge.
+function resetCaptchaAfterFailure() {
+  if (captcha.value.type === 'builtin') {
+    void refreshCaptcha().catch(() => undefined)
+  } else if (captcha.value.type === 'cap') {
+    externalCaptchaToken.value = ''
+    capWidget.value?.reset()
   }
 }
 
@@ -677,6 +708,14 @@ onUnmounted(() => {
           <button type="button" class="btn btn-link btn-sm" @click="refreshCaptcha">换一题</button>
         </div>
         <div v-else-if="captcha.type === 'turnstile'" id="login-turnstile-container" class="form-group"></div>
+        <div v-else-if="captcha.type === 'cap'" class="form-group">
+          <cap-widget
+            ref="capWidget"
+            :data-cap-api-endpoint="captcha.api_endpoint"
+            @solve="handleCapSolve"
+            @error="handleCapError"
+          ></cap-widget>
+        </div>
       </div>
       <footer class="login-footer">
         <button type="button" class="btn btn-default" @click="showLogin = false">取消</button>
