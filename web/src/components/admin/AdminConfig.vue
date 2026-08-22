@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { AdminConfig, AdminOverview } from '../../types'
 import type { NoticeType } from '../../shared/notify'
 import { adminApi } from '../../shared/adminApi'
 import { normalizeStorageSources, validateStorageSources } from '../../shared/storageSources'
 import StorageSourcesEditor from './StorageSourcesEditor.vue'
 
-const emit = defineEmits<{ notice: [message: string, type?: NoticeType] }>()
+const emit = defineEmits<{
+  notice: [message: string, type?: NoticeType]
+  dirty: [value: boolean]
+}>()
 
 const loading = ref(true)
 const saving = ref(false)
@@ -15,6 +18,33 @@ const uploadingIcon = ref(false)
 const overview = ref<AdminOverview | null>(null)
 const config = ref<AdminConfig | null>(null)
 const siteIconInput = ref<HTMLInputElement | null>(null)
+// The form v-models straight onto the object the API returned, so keep a snapshot
+// to diff against. Re-taken after every successful save.
+const snapshot = ref<string>('')
+
+const isDirty = computed(() => {
+  if (!config.value || !snapshot.value) return false
+  return JSON.stringify(config.value) !== snapshot.value
+})
+
+function warnBeforeUnload(event: BeforeUnloadEvent) {
+  event.preventDefault()
+  // Some browsers still require a truthy returnValue.
+  event.returnValue = ''
+}
+
+// The parent guards its own tab switches; beforeunload covers the plain <a href>
+// links in the admin navbar, which never reach navigate().
+watch(isDirty, dirty => {
+  emit('dirty', dirty)
+  if (dirty) window.addEventListener('beforeunload', warnBeforeUnload)
+  else window.removeEventListener('beforeunload', warnBeforeUnload)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', warnBeforeUnload)
+  emit('dirty', false)
+})
 
 async function load() {
   loading.value = true
@@ -23,6 +53,7 @@ async function load() {
     data.config.storage_sources = normalizeStorageSources(data.config.storage_sources)
     overview.value = data
     config.value = data.config
+    snapshot.value = JSON.stringify(data.config)
   } catch (error) {
     emit('notice', error instanceof Error ? error.message : '加载配置失败', 'danger')
   } finally {
@@ -43,6 +74,7 @@ async function save() {
     const result = await adminApi.saveConfig(config.value)
     result.config.storage_sources = normalizeStorageSources(result.config.storage_sources)
     config.value = result.config
+    snapshot.value = JSON.stringify(result.config)
     emit('notice', result.msg || '保存成功', 'success')
   } catch (error) {
     emit('notice', error instanceof Error ? error.message : '保存失败', 'danger')

@@ -27,8 +27,9 @@ func TestImageListPayloadBuildsFrontendGalleryData(t *testing.T) {
 		}
 	})
 
-	date := "2026/06/02/"
-	imageDir := filepath.Join("i", "2026", "06", "02")
+	now := time.Now()
+	date := now.Format("2006/01/02/")
+	imageDir := filepath.Join("i", now.Format("2006"), now.Format("01"), now.Format("02"))
 	if err := os.MkdirAll(imageDir, 0755); err != nil {
 		t.Fatalf("create image dir: %v", err)
 	}
@@ -62,16 +63,16 @@ func TestImageListPayloadBuildsFrontendGalleryData(t *testing.T) {
 	if file.Name != "first.jpg" {
 		t.Fatalf("Name = %q, want first.jpg", file.Name)
 	}
-	if file.URL != "https://img.example.com/i/2026/06/02/first.jpg" {
+	if file.URL != "https://img.example.com/i/"+date+"first.jpg" {
 		t.Fatalf("URL = %q", file.URL)
 	}
-	if file.Path != "/i/2026/06/02/first.jpg" {
+	if file.Path != "/i/"+date+"first.jpg" {
 		t.Fatalf("Path = %q", file.Path)
 	}
-	if file.ThumbURL != "/app/thumb?img=/i/2026/06/02/first.jpg" {
+	if file.ThumbURL != "/app/thumb?img=/i/"+date+"first.jpg" {
 		t.Fatalf("ThumbURL = %q", file.ThumbURL)
 	}
-	if file.InfoURL != "/app/info?img=/i/2026/06/02/first.jpg" {
+	if file.InfoURL != "/app/info?img=/i/"+date+"first.jpg" {
 		t.Fatalf("InfoURL = %q", file.InfoURL)
 	}
 }
@@ -91,8 +92,9 @@ func TestImageListPayloadSearchesOriginalFileName(t *testing.T) {
 		}
 	})
 
-	date := "2026/06/02/"
-	imageDir := filepath.Join("i", "2026", "06", "02")
+	now := time.Now()
+	date := now.Format("2006/01/02/")
+	imageDir := filepath.Join("i", now.Format("2006"), now.Format("01"), now.Format("02"))
 	if err := os.MkdirAll(imageDir, 0755); err != nil {
 		t.Fatalf("create image dir: %v", err)
 	}
@@ -101,7 +103,7 @@ func TestImageListPayloadSearchesOriginalFileName(t *testing.T) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	service.SaveImageMetadata("/i/2026/06/02/abc123.jpg", "Holiday Beach.JPG", 1, "web", time.Date(2026, 6, 2, 1, 2, 3, 0, time.UTC))
+	service.SaveImageMetadata("/i/"+date+"abc123.jpg", "Holiday Beach.JPG", 1, "web", now)
 
 	req := httptest.NewRequest("GET", "/api/list?date="+date+"&q=beach", nil)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -149,15 +151,16 @@ func TestImageListPayloadIncludesOriginalNameWithoutQuery(t *testing.T) {
 		}
 	})
 
-	date := "2026/06/02/"
-	imageDir := filepath.Join("i", "2026", "06", "02")
+	now := time.Now()
+	date := now.Format("2006/01/02/")
+	imageDir := filepath.Join("i", now.Format("2006"), now.Format("01"), now.Format("02"))
 	if err := os.MkdirAll(imageDir, 0755); err != nil {
 		t.Fatalf("create image dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(imageDir, "stored.jpg"), []byte("x"), 0644); err != nil {
 		t.Fatalf("write image: %v", err)
 	}
-	service.SaveImageMetadata("/i/2026/06/02/stored.jpg", "源文件名.jpg", 1, "web", time.Date(2026, 6, 2, 1, 2, 3, 0, time.UTC))
+	service.SaveImageMetadata("/i/"+date+"stored.jpg", "源文件名.jpg", 1, "web", now)
 
 	req := httptest.NewRequest("GET", "/api/list?date="+date, nil)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -196,8 +199,9 @@ func TestImageListPayloadSupportsExtAndQueryTogether(t *testing.T) {
 		}
 	})
 
-	date := "2026/06/02/"
-	imageDir := filepath.Join("i", "2026", "06", "02")
+	now := time.Now()
+	date := now.Format("2006/01/02/")
+	imageDir := filepath.Join("i", now.Format("2006"), now.Format("01"), now.Format("02"))
 	if err := os.MkdirAll(imageDir, 0755); err != nil {
 		t.Fatalf("create image dir: %v", err)
 	}
@@ -206,8 +210,8 @@ func TestImageListPayloadSupportsExtAndQueryTogether(t *testing.T) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	service.SaveImageMetadata("/i/2026/06/02/match.jpg", "Conference Badge.JPG", 1, "web", time.Date(2026, 6, 2, 1, 2, 3, 0, time.UTC))
-	service.SaveImageMetadata("/i/2026/06/02/match.png", "Conference Badge.PNG", 1, "web", time.Date(2026, 6, 2, 1, 2, 3, 0, time.UTC))
+	service.SaveImageMetadata("/i/"+date+"match.jpg", "Conference Badge.JPG", 1, "web", now)
+	service.SaveImageMetadata("/i/"+date+"match.png", "Conference Badge.PNG", 1, "web", now)
 
 	req := httptest.NewRequest("GET", "/api/list?date="+date+"&ext=jpg&q=conference", nil)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

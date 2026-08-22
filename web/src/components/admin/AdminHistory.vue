@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { GalleryBootstrap, GalleryFile } from '../../types'
 import type { NoticeType } from '../../shared/notify'
 import { adminApi } from '../../shared/adminApi'
-import { copyText } from '../../shared/clipboard'
+import { runBatchDelete, summarizeBatchDelete } from '../../shared/batchDelete'
+import { useCopy } from '../../shared/useCopy'
 
 const emit = defineEmits<{ notice: [message: string, type?: NoticeType] }>()
 
@@ -12,9 +13,51 @@ const gallery = ref<GalleryBootstrap | null>(null)
 const selectedImage = ref<GalleryFile | null>(null)
 const failedThumbs = ref<Set<string>>(new Set())
 const queryInput = ref('')
+const selected = ref<Set<string>>(new Set())
+
+const notify = (message: string, type?: NoticeType) => emit('notice', message, type)
+const copy = useCopy(notify)
+// Filter buttons stay enabled while loading, so overlapping requests are easy to
+// trigger; cancel the previous one rather than letting it land last.
+let inflight: AbortController | null = null
 
 const activeDate = computed(() => gallery.value?.date || '')
 const activeExt = computed(() => gallery.value?.ext || gallery.value?.search || '')
+const files = computed(() => gallery.value?.files || [])
+const selectedFiles = computed(() => files.value.filter(file => selected.value.has(file.url)))
+const allSelected = computed(() => files.value.length > 0 && selectedFiles.value.length === files.value.length)
+
+function toggleFile(file: GalleryFile) {
+  const next = new Set(selected.value)
+  if (next.has(file.url)) next.delete(file.url)
+  else next.add(file.url)
+  selected.value = next
+}
+
+function toggleAll() {
+  selected.value = allSelected.value ? new Set() : new Set(files.value.map(file => file.url))
+}
+
+async function removeSelected() {
+  const targets = selectedFiles.value
+  if (targets.length === 0) return
+  if (!window.confirm(`确认删除选中的 ${targets.length} 个图片？此操作不可恢复。`)) return
+
+  const byUrl = new Map(targets.map(file => [file.url, file]))
+  const outcome = await runBatchDelete(
+    targets.map(file => file.url),
+    async url => adminApi.deleteHistory(byUrl.get(url)!.path)
+  )
+  const deleted = new Set(outcome.succeeded)
+  if (gallery.value) gallery.value.files = gallery.value.files.filter(item => !deleted.has(item.url))
+  selected.value = new Set([...selected.value].filter(url => !deleted.has(url)))
+  const summary = summarizeBatchDelete(outcome)
+  notify(summary.message, summary.type)
+}
+
+function copySelected() {
+  void copy(selectedFiles.value.map(file => file.url).join('\n'), `已复制 ${selectedFiles.value.length} 条链接`)
+}
 
 function query(next: Partial<{ date: string; ext: string; q: string }>) {
   const params = new URLSearchParams()
@@ -28,30 +71,39 @@ function query(next: Partial<{ date: string; ext: string; q: string }>) {
 }
 
 async function load(next: Partial<{ date: string; ext: string; q: string }> = {}) {
-  loading.value = true
-  try {
-    gallery.value = await adminApi.history(query(next))
-    queryInput.value = gallery.value.q || ''
-  } catch (error) {
-    emit('notice', error instanceof Error ? error.message : '加载失败', 'danger')
-  } finally {
-    loading.value = false
-  }
-}
+  inflight?.abort()
+  const controller = new AbortController()
+  inflight = controller
 
-async function copy(url: string) {
-  await copyText(url)
-  emit('notice', '复制成功', 'success')
+  loading.value = true
+  const typedQuery = queryInput.value
+  try {
+    gallery.value = await adminApi.history(query(next), { signal: controller.signal })
+    selected.value = new Set()
+    if (queryInput.value === typedQuery) queryInput.value = gallery.value.q || ''
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') return
+    notify(error instanceof Error ? error.message : '加载失败', 'danger')
+  } finally {
+    if (inflight === controller) {
+      inflight = null
+      loading.value = false
+    }
+  }
 }
 
 async function remove(file: GalleryFile) {
   if (!window.confirm('确认删除此图片？')) return
-  const result = await adminApi.deleteHistory(file.path)
-  if (result.code === 200 && gallery.value) {
-    gallery.value.files = gallery.value.files.filter(item => item.url !== file.url)
-    emit('notice', result.msg, 'success')
-  } else {
-    emit('notice', result.msg || '删除失败', 'danger')
+  try {
+    const result = await adminApi.deleteHistory(file.path)
+    if (result.code === 200 && gallery.value) {
+      gallery.value.files = gallery.value.files.filter(item => item.url !== file.url)
+      notify(result.msg, 'success')
+    } else {
+      notify(result.msg || '删除失败', 'danger')
+    }
+  } catch (error) {
+    notify(error instanceof Error ? error.message : '删除失败', 'danger')
   }
 }
 
@@ -67,6 +119,7 @@ function clearSearch() {
 }
 
 onMounted(() => load())
+onUnmounted(() => inflight?.abort())
 </script>
 
 <template>
@@ -89,8 +142,23 @@ onMounted(() => load())
       </form>
     </div>
 
+    <div v-if="gallery.files.length" class="batch-bar">
+      <label class="batch-select-all">
+        <input type="checkbox" :checked="allSelected" @change="toggleAll">
+        全选（{{ gallery.files.length }}）
+      </label>
+      <template v-if="selectedFiles.length">
+        <span class="batch-count">已选 {{ selectedFiles.length }} 个</span>
+        <button type="button" class="btn btn-xs btn-primary" @click="copySelected">复制链接</button>
+        <button type="button" class="btn btn-xs btn-danger" @click="removeSelected">批量删除</button>
+      </template>
+    </div>
+
     <section v-if="gallery.files.length" class="admin-gallery">
-      <article v-for="file in gallery.files" :key="file.url" class="admin-card">
+      <article v-for="file in gallery.files" :key="file.url" class="admin-card" :class="{ 'is-selected': selected.has(file.url) }">
+        <label class="admin-card-select" @click.stop>
+          <input type="checkbox" :checked="selected.has(file.url)" @change="toggleFile(file)">
+        </label>
         <button class="image-button" @click="selectedImage = file">
           <span v-if="failedThumbs.has(file.url)" class="thumb-fallback">{{ displayName(file) }}</span>
           <img v-else :src="file.thumb_url" :alt="displayName(file)" loading="lazy" decoding="async" fetchpriority="low" @error="markFailed(file.url)">
@@ -112,6 +180,54 @@ onMounted(() => load())
 </template>
 
 <style scoped>
+.batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid #dbe6f8;
+  border-radius: 8px;
+  background: #f2f6fd;
+}
+.batch-select-all {
+  margin: 0;
+  font-weight: 700;
+  color: #35507a;
+  cursor: pointer;
+}
+.batch-select-all input {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.batch-count {
+  color: #35507a;
+}
+.admin-card {
+  position: relative;
+}
+.admin-card.is-selected {
+  outline: 2px solid #3280fc;
+  outline-offset: 2px;
+}
+.admin-card-select {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  margin: 0;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+.admin-card-select input {
+  margin: 0;
+  vertical-align: middle;
+  cursor: pointer;
+}
 .admin-search {
   display: flex;
   flex: 1 1 320px;

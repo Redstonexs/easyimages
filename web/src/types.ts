@@ -41,6 +41,17 @@ export interface UploadResult {
   storage_source?: string
 }
 
+export type UploadStatus = 'waiting' | 'uploading' | 'processing' | 'success' | 'error'
+
+export interface ProgressItem {
+  id: number
+  name: string
+  size: number
+  loaded: number
+  status: UploadStatus
+  message: string
+}
+
 export interface GalleryFile {
   name: string
   original_name?: string

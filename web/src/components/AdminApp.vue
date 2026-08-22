@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { AdminBootstrap, AdminView } from '../types'
-import type { Notice as NoticeItem } from '../shared/notify'
-import type { NoticeType } from '../shared/notify'
-import { createNotice } from '../shared/notify'
+import { useNotices } from '../shared/useNotices'
 import NoticeStack from './NoticeStack.vue'
 import AdminChart from './admin/AdminChart.vue'
 import AdminConfig from './admin/AdminConfig.vue'
@@ -13,8 +11,10 @@ import AdminUrlList from './admin/AdminUrlList.vue'
 
 const props = defineProps<{ bootstrap: AdminBootstrap }>()
 
-const notices = ref<NoticeItem[]>([])
 const currentView = ref<AdminView>(props.bootstrap.view)
+const configDirty = ref(false)
+
+const { notices, notify } = useNotices()
 
 const navItems: Array<{ view: AdminView; label: string; href: string }> = [
   { view: 'manager', label: '配置', href: '/admin/manager' },
@@ -26,24 +26,25 @@ const navItems: Array<{ view: AdminView; label: string; href: string }> = [
 
 const title = computed(() => navItems.find(item => item.view === currentView.value)?.label || '管理后台')
 
-function notify(message: string, type: NoticeType = 'info') {
-  const notice = createNotice(message, type)
-  notices.value.push(notice)
-  window.setTimeout(() => {
-    notices.value = notices.value.filter(item => item.id !== notice.id)
-  }, 3600)
-}
-
 function navigate(view: AdminView, href: string) {
+  if (view === currentView.value) return
+  if (configDirty.value && !window.confirm('配置尚未保存，确定要离开吗？未保存的修改将丢失。')) return
+  configDirty.value = false
   currentView.value = view
   window.history.pushState({ view }, '', href)
 }
 
+function handlePopState() {
+  const item = navItems.find(nav => nav.href === window.location.pathname)
+  if (item) currentView.value = item.view
+}
+
 onMounted(() => {
-  window.addEventListener('popstate', () => {
-    const item = navItems.find(nav => nav.href === window.location.pathname)
-    if (item) currentView.value = item.view
-  })
+  window.addEventListener('popstate', handlePopState)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('popstate', handlePopState)
 })
 </script>
 
@@ -71,7 +72,7 @@ onMounted(() => {
       </div>
     </header>
 
-    <AdminConfig v-if="currentView === 'manager'" @notice="notify" />
+    <AdminConfig v-if="currentView === 'manager'" @notice="notify" @dirty="configDirty = $event" />
     <AdminHistory v-else-if="currentView === 'history'" @notice="notify" />
     <AdminUrlList v-else-if="currentView === 'urllist'" @notice="notify" />
     <AdminChart v-else-if="currentView === 'chart'" />

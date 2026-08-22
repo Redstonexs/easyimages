@@ -1,41 +1,50 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import type { CaptchaData, UploadBootstrap, UploadResult } from '../types'
-import type { Notice, NoticeType } from '../shared/notify'
-import { copyText } from '../shared/clipboard'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import type { CaptchaData, ProgressItem, UploadBootstrap, UploadResult } from '../types'
 import { fetchJSON } from '../shared/api'
+import { extractImageFiles, isTextEntryTarget } from '../shared/clipboardFiles'
+import { createSemaphore } from '../shared/concurrency'
 import { formatSize } from '../shared/format'
-import { createNotice } from '../shared/notify'
+import type { LinkFormat } from '../shared/uploadFormats'
+import { formatResults, resultName } from '../shared/uploadFormats'
+import { useCopy } from '../shared/useCopy'
+import { useNotices } from '../shared/useNotices'
 import NoticeStack from './NoticeStack.vue'
 
 const props = defineProps<{
   bootstrap: UploadBootstrap
 }>()
 
-interface ProgressItem {
-  id: number
-  name: string
-  size: number
-  loaded: number
-  status: 'waiting' | 'uploading' | 'processing' | 'success' | 'error'
-  message: string
-}
-
 const DEFAULT_CHUNK_SIZE = 16 * 1024 * 1024
 const MAX_CONCURRENT_CHUNKS = 4
+const MAX_CONCURRENT_FILES = 3
+// One budget shared by whole-file and chunk requests. Without it the file pool and
+// the per-file chunk pool multiply (3 x 4 = 12) past the ~6 connections a browser
+// opens per origin; the server runs plain HTTP/1.1, so there is no multiplexing.
+const MAX_CONCURRENT_REQUESTS = 6
 const MAX_RETRIES = 3
 
+const requestSlots = createSemaphore(MAX_CONCURRENT_REQUESTS)
+
 const fileInput = ref<HTMLInputElement | null>(null)
-const uploadArea = ref<HTMLElement | null>(null)
 const isDragging = ref(false)
+const isWindowDragging = ref(false)
 const isUploading = ref(false)
 const progressItems = ref<ProgressItem[]>([])
 const results = ref<UploadResult[]>([])
-const uploadedTotal = ref(0)
 const totalSize = ref(0)
-const activeFileIndex = ref(0)
-const notices = ref<Notice[]>([])
 const selectedStorageSource = ref(props.bootstrap.config.default_storage_source || props.bootstrap.config.storage_sources[0]?.id || 'local')
+
+// Upload queue. Files may be appended while a batch is in flight, so workers pull
+// from a shared cursor instead of iterating a fixed list. queue[i] pairs with
+// progressItems[i]; neither is ever spliced.
+const queue: File[] = []
+let queueCursor = 0
+let activeWorkers = 0
+let nextItemId = 0
+// dragenter/dragleave fire for every child element, so count depth instead of
+// clearing the overlay on the first leave.
+let dragDepth = 0
 
 const showLogin = ref(false)
 const loginUser = ref('')
@@ -46,8 +55,14 @@ const captchaAnswer = ref('')
 const externalCaptchaToken = ref('')
 const turnstileRendered = ref(false)
 
+const { notices, notify } = useNotices()
+const copy = useCopy(notify)
+
 const maxSizeLabel = computed(() => formatSize(props.bootstrap.config.max_size))
 const chunkSize = computed(() => props.bootstrap.config.chunk_size > 0 ? props.bootstrap.config.chunk_size : DEFAULT_CHUNK_SIZE)
+const uploadedTotal = computed(() => progressItems.value.reduce((sum, item) => sum + item.loaded, 0))
+const settledCount = computed(() => progressItems.value.filter(item => item.status === 'success' || item.status === 'error').length)
+const copyableResults = computed(() => results.value.filter(result => Boolean(result.url)))
 const overallPercent = computed(() => {
   if (totalSize.value === 0) return 0
   const percent = Math.round((uploadedTotal.value / totalSize.value) * 100)
@@ -64,16 +79,15 @@ const overallInfo = computed(() => {
   }
   const processingItem = progressItems.value.find(item => item.status === 'processing')
   if (processingItem) return processingItem.message
-  return `上传中 (${activeFileIndex.value}/${progressItems.value.length}): ${formatSize(uploadedTotal.value)} / ${formatSize(totalSize.value)}`
+  return `上传中 (${settledCount.value}/${progressItems.value.length}): ${formatSize(uploadedTotal.value)} / ${formatSize(totalSize.value)}`
 })
 
-function notify(message: string, type: NoticeType = 'info') {
-  const notice = createNotice(message, type)
-  notices.value.push(notice)
-  window.setTimeout(() => {
-    notices.value = notices.value.filter(item => item.id !== notice.id)
-  }, 3600)
-}
+const copyFormats: Array<{ format: LinkFormat; label: string }> = [
+  { format: 'url', label: '全部链接' },
+  { format: 'markdown', label: '全部 Markdown' },
+  { format: 'html', label: '全部 HTML' },
+  { format: 'bbcode', label: '全部 BBCode' }
+]
 
 function selectFiles() {
   fileInput.value?.click()
@@ -81,96 +95,167 @@ function selectFiles() {
 
 function handleFileInput(event: Event) {
   const input = event.target as HTMLInputElement
-  if (input.files) void handleFiles(input.files)
+  if (input.files) handleFiles(input.files)
+  // Reset so picking the same file twice in a row still fires change.
+  input.value = ''
 }
 
-function handleDrop(event: DragEvent) {
-  event.preventDefault()
+function dragHasFiles(event: DragEvent) {
+  return Array.from(event.dataTransfer?.types || []).includes('Files')
+}
+
+function resetDragState() {
+  dragDepth = 0
   isDragging.value = false
-  if (event.dataTransfer?.files) void handleFiles(event.dataTransfer.files)
+  isWindowDragging.value = false
 }
 
-async function handleFiles(fileList: FileList) {
-  if (fileList.length === 0 || isUploading.value) return
+function handleWindowDragEnter(event: DragEvent) {
+  if (!dragHasFiles(event)) return
+  dragDepth++
+  isWindowDragging.value = true
+}
 
-  const files: File[] = []
+function handleWindowDragLeave(event: DragEvent) {
+  if (!dragHasFiles(event)) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) {
+    isWindowDragging.value = false
+    isDragging.value = false
+  }
+}
+
+function handleWindowDragOver(event: DragEvent) {
+  // Required: without it the browser opens the dropped image and discards all
+  // in-flight upload state.
+  event.preventDefault()
+}
+
+function handleWindowDrop(event: DragEvent) {
+  event.preventDefault()
+  resetDragState()
+  if (event.dataTransfer?.files?.length) handleFiles(event.dataTransfer.files)
+}
+
+function handleAreaDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (dragHasFiles(event)) isDragging.value = true
+}
+
+function handleAreaDragLeave(event: DragEvent) {
+  const next = event.relatedTarget as Node | null
+  const area = event.currentTarget as Node | null
+  // Moving onto a child still counts as being over the dropzone.
+  if (next && area && area.contains(next)) return
+  isDragging.value = false
+}
+
+function handlePaste(event: ClipboardEvent) {
+  // Leave text fields (the login form) alone.
+  if (isTextEntryTarget(event.target)) return
+  const files = extractImageFiles(event.clipboardData?.items)
+  if (files.length === 0) return
+  event.preventDefault()
+  handleFiles(files)
+}
+
+function handleFiles(fileList: FileList | File[]) {
+  const accepted: File[] = []
   for (const file of Array.from(fileList)) {
     if (file.size > props.bootstrap.config.max_size) {
       notify(`"${file.name}" 超过大小限制 (${maxSizeLabel.value})`, 'warning')
       continue
     }
-    files.push(file)
+    accepted.push(file)
   }
-  if (files.length === 0) return
+  if (accepted.length === 0) return
 
+  if (!isUploading.value) {
+    // Starting fresh: clear the finished batch before queueing the new one.
+    queue.length = 0
+    queueCursor = 0
+    progressItems.value = []
+    totalSize.value = 0
+  }
+
+  for (const file of accepted) {
+    queue.push(file)
+    progressItems.value.push({
+      id: nextItemId++,
+      name: file.name,
+      size: file.size,
+      loaded: 0,
+      status: 'waiting',
+      message: formatSize(file.size)
+    })
+  }
+  totalSize.value += accepted.reduce((sum, file) => sum + file.size, 0)
   isUploading.value = true
-  uploadedTotal.value = 0
-  totalSize.value = files.reduce((sum, file) => sum + file.size, 0)
-  activeFileIndex.value = 0
-  progressItems.value = files.map((file, index) => ({
-    id: index,
-    name: file.name,
-    size: file.size,
-    loaded: 0,
-    status: 'waiting',
-    message: formatSize(file.size)
-  }))
+  ensureWorkers()
+}
 
-  let successCount = 0
-  let failCount = 0
-  for (let index = 0; index < files.length; index++) {
-    const file = files[index]
+function ensureWorkers() {
+  // runWorker claims its index synchronously, so re-checking the cursor is safe.
+  while (activeWorkers < MAX_CONCURRENT_FILES && queueCursor < queue.length) {
+    activeWorkers++
+    void runWorker()
+  }
+}
+
+async function runWorker() {
+  while (queueCursor < queue.length) {
+    const index = queueCursor++
+    const file = queue[index]
     const item = progressItems.value[index]
-    const baseUploaded = uploadedTotal.value
-    activeFileIndex.value = index
     item.status = 'uploading'
 
     try {
       const result = file.size > chunkSize.value
         ? await uploadFileChunked(
           file,
-          loaded => updateFileProgress(item, baseUploaded, loaded),
-          message => markFileProcessing(item, baseUploaded, message)
+          loaded => updateFileProgress(item, loaded),
+          message => markFileProcessing(item, message)
         )
         : await uploadFileWhole(
           file,
-          loaded => updateFileProgress(item, baseUploaded, loaded),
-          message => markFileProcessing(item, baseUploaded, message)
+          loaded => updateFileProgress(item, loaded),
+          message => markFileProcessing(item, message)
         )
       item.status = 'success'
       item.loaded = file.size
       item.message = formatSize(file.size)
-      uploadedTotal.value = baseUploaded + file.size
-      successCount++
       if (result.url) results.value.push(result)
     } catch (error) {
       item.status = 'error'
+      // Count failures as complete so the overall bar still reaches 100%.
       item.loaded = file.size
       item.message = error instanceof Error ? error.message : '上传失败'
-      uploadedTotal.value = baseUploaded + file.size
-      failCount++
     }
-    activeFileIndex.value = index + 1
   }
 
+  activeWorkers--
+  if (activeWorkers === 0) finishBatch()
+}
+
+function finishBatch() {
   isUploading.value = false
   if (fileInput.value) fileInput.value.value = ''
-  if (failCount === 0) notify('上传成功', 'success')
-  else if (successCount > 0) notify(`${successCount} 个文件上传成功，${failCount} 个失败`, 'warning')
+  const success = progressItems.value.filter(item => item.status === 'success').length
+  const failed = progressItems.value.filter(item => item.status === 'error').length
+  if (failed === 0) notify('上传成功', 'success')
+  else if (success > 0) notify(`${success} 个文件上传成功，${failed} 个失败`, 'warning')
   else notify('上传失败', 'danger')
 }
 
-function updateFileProgress(item: ProgressItem, baseUploaded: number, loaded: number) {
+function updateFileProgress(item: ProgressItem, loaded: number) {
   item.loaded = Math.min(loaded, item.size)
   item.message = `${formatSize(loaded)} / ${formatSize(item.size)}`
-  uploadedTotal.value = baseUploaded + item.loaded
 }
 
-function markFileProcessing(item: ProgressItem, baseUploaded: number, message: string) {
+function markFileProcessing(item: ProgressItem, message: string) {
   item.status = 'processing'
   item.loaded = item.size
   item.message = message
-  uploadedTotal.value = baseUploaded + item.size
 }
 
 function progressPercent(item: ProgressItem) {
@@ -179,8 +264,12 @@ function progressPercent(item: ProgressItem) {
   return item.status === 'success' ? percent : Math.min(percent, 99)
 }
 
-function resultName(result: UploadResult) {
-  return result.original_name || result.srcName || ''
+function copyAll(format: LinkFormat) {
+  void copy(formatResults(results.value, format), `已复制 ${copyableResults.value.length} 条链接`)
+}
+
+function clearResults() {
+  results.value = []
 }
 
 function uploadFileWhole(
@@ -188,7 +277,7 @@ function uploadFileWhole(
   onProgress: (loaded: number) => void,
   onProcessing: (message: string) => void
 ): Promise<UploadResult> {
-  return new Promise((resolve, reject) => {
+  return requestSlots.run(() => new Promise<UploadResult>((resolve, reject) => {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('storage_source', selectedStorageSource.value)
@@ -204,7 +293,7 @@ function uploadFileWhole(
     xhr.timeout = 120000
     xhr.open('POST', '/app/upload')
     xhr.send(formData)
-  })
+  }))
 }
 
 async function uploadFileChunked(
@@ -286,7 +375,7 @@ async function uploadFileChunked(
 }
 
 function sendChunk(formData: FormData, onProgress: (loaded: number) => void, fallback = '分片上传失败'): Promise<UploadResult> {
-  return new Promise((resolve, reject) => {
+  return requestSlots.run(() => new Promise<UploadResult>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.upload.addEventListener('progress', event => {
       if (event.lengthComputable) onProgress(event.loaded)
@@ -297,7 +386,7 @@ function sendChunk(formData: FormData, onProgress: (loaded: number) => void, fal
     xhr.timeout = 120000
     xhr.open('POST', '/app/upload/chunk')
     xhr.send(formData)
-  })
+  }))
 }
 
 function resolveUpload(
@@ -325,15 +414,6 @@ function resolveUpload(
     // Keep status fallback.
   }
   reject(new Error(message))
-}
-
-async function copy(value: string) {
-  try {
-    await copyText(value)
-    notify('复制成功', 'success')
-  } catch {
-    notify('复制失败，请手动复制', 'danger')
-  }
 }
 
 function openAdmin() {
@@ -426,11 +506,30 @@ onMounted(() => {
   if (props.bootstrap.must_login === 1 && captcha.value.type === 'builtin') {
     void refreshCaptcha().catch(() => undefined)
   }
+  window.addEventListener('dragenter', handleWindowDragEnter)
+  window.addEventListener('dragover', handleWindowDragOver)
+  window.addEventListener('dragleave', handleWindowDragLeave)
+  window.addEventListener('drop', handleWindowDrop)
+  document.addEventListener('paste', handlePaste)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('dragenter', handleWindowDragEnter)
+  window.removeEventListener('dragover', handleWindowDragOver)
+  window.removeEventListener('dragleave', handleWindowDragLeave)
+  window.removeEventListener('drop', handleWindowDrop)
+  document.removeEventListener('paste', handlePaste)
 })
 </script>
 
 <template>
   <NoticeStack :notices="notices" />
+  <div v-if="isWindowDragging" class="drop-overlay" aria-hidden="true">
+    <div class="drop-overlay-inner">
+      <i class="icon icon-cloud-upload icon-3x" aria-hidden="true"></i>
+      <p>松开即可上传到本站</p>
+    </div>
+  </div>
   <main class="ei-shell upload-shell">
     <header class="ei-title">
       <h1>{{ bootstrap.config.title }}</h1>
@@ -438,7 +537,6 @@ onMounted(() => {
     </header>
 
     <section
-      ref="uploadArea"
       class="upload-area"
       :class="{ dragover: isDragging, uploading: isUploading }"
       role="button"
@@ -446,15 +544,14 @@ onMounted(() => {
       @click="selectFiles"
       @keydown.enter.prevent="selectFiles"
       @keydown.space.prevent="selectFiles"
-      @dragover.prevent="isDragging = !isUploading"
-      @dragleave="isDragging = false"
-      @drop="handleDrop"
+      @dragover="handleAreaDragOver"
+      @dragleave="handleAreaDragLeave"
     >
       <i class="icon icon-cloud-upload icon-3x" aria-hidden="true"></i>
       <h3>拖拽文件到此处或点击选择</h3>
       <p class="text-muted">支持 jpg, png, gif, webp 等格式，单文件最大 {{ maxSizeLabel }}</p>
       <input ref="fileInput" type="file" multiple accept="image/*" class="sr-only" @change="handleFileInput">
-      <button type="button" class="btn btn-primary btn-lg upload-btn" :disabled="isUploading" @click.stop="selectFiles">
+      <button type="button" class="btn btn-primary btn-lg upload-btn" @click.stop="selectFiles">
         <i class="icon icon-upload" aria-hidden="true"></i> 选择文件
       </button>
     </section>
@@ -497,6 +594,19 @@ onMounted(() => {
 
     <section v-if="results.length" class="result-area">
       <h3>上传结果</h3>
+      <div v-if="copyableResults.length > 1" class="batch-actions">
+        <span class="batch-actions-count">共 {{ copyableResults.length }} 条链接</span>
+        <div class="batch-actions-buttons">
+          <button
+            v-for="option in copyFormats"
+            :key="option.format"
+            type="button"
+            class="btn btn-primary btn-sm"
+            @click="copyAll(option.format)"
+          >{{ option.label }}</button>
+          <button type="button" class="btn btn-default btn-sm" @click="clearResults">清空结果</button>
+        </div>
+      </div>
       <article v-for="(result, index) in results" :key="`${result.url}-${index}`" class="link-box">
         <div class="row">
           <div class="col-md-3">
@@ -577,6 +687,52 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1080;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(50, 128, 252, 0.14);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+.drop-overlay-inner {
+  border: 3px dashed #3280fc;
+  border-radius: 20px;
+  padding: 48px 72px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #3280fc;
+  text-align: center;
+  box-shadow: 0 18px 48px rgba(15, 42, 90, 0.18);
+}
+.drop-overlay-inner p {
+  margin: 12px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+.batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: #f2f6fd;
+  border: 1px solid #dbe6f8;
+}
+.batch-actions-count {
+  font-weight: 700;
+  color: #35507a;
+}
+.batch-actions-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .upload-area {
   border: 2px dashed #c7d2e1;
   border-radius: 16px;

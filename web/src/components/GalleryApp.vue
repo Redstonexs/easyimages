@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { GalleryBootstrap, GalleryFile } from '../types'
-import type { Notice, NoticeType } from '../shared/notify'
-import { copyText } from '../shared/clipboard'
 import { fetchJSON } from '../shared/api'
-import { createNotice } from '../shared/notify'
+import { parseGalleryParams } from '../shared/galleryParams'
+import { useCopy } from '../shared/useCopy'
+import { useNotices } from '../shared/useNotices'
 import NoticeStack from './NoticeStack.vue'
 
 const props = defineProps<{
@@ -14,20 +14,18 @@ const props = defineProps<{
 const gallery = ref<GalleryBootstrap>({ ...props.bootstrap })
 const loading = ref(false)
 const selectedImage = ref<GalleryFile | null>(null)
-const notices = ref<Notice[]>([])
 const failedThumbs = ref<Set<string>>(new Set())
 const queryInput = ref(props.bootstrap.q || '')
 
+const { notices, notify } = useNotices()
+const copy = useCopy(notify)
+
+// Cancels the previous request so a slow earlier response cannot overwrite a
+// newer one when filters are clicked in quick succession.
+let inflight: AbortController | null = null
+
 const activeDate = computed(() => gallery.value.date)
 const activeExt = computed(() => gallery.value.ext || gallery.value.search)
-
-function notify(message: string, type: NoticeType = 'info') {
-  const notice = createNotice(message, type)
-  notices.value.push(notice)
-  window.setTimeout(() => {
-    notices.value = notices.value.filter(item => item.id !== notice.id)
-  }, 3200)
-}
 
 function buildQuery(next: Partial<{ date: string; ext: string; q: string; num: number }>) {
   const params = new URLSearchParams()
@@ -42,23 +40,57 @@ function buildQuery(next: Partial<{ date: string; ext: string; q: string; num: n
   return params
 }
 
-async function loadGallery(next: Partial<{ date: string; ext: string; q: string; num: number }>) {
-  const pageParams = buildQuery(next)
+async function loadGallery(
+  next: Partial<{ date: string; ext: string; q: string; num: number }>,
+  options: { push?: boolean; params?: URLSearchParams } = {}
+) {
+  const { push = true, params } = options
+  const pageParams = params ?? buildQuery(next)
   const apiParams = new URLSearchParams(pageParams)
   apiParams.set('num', String(next.num ?? gallery.value.limit))
 
+  inflight?.abort()
+  const controller = new AbortController()
+  inflight = controller
+
+  const typedQuery = queryInput.value
   loading.value = true
   try {
-    const nextGallery = await fetchJSON<GalleryBootstrap>(`/api/list?${apiParams.toString()}`)
+    const nextGallery = await fetchJSON<GalleryBootstrap>(`/api/list?${apiParams.toString()}`, {
+      signal: controller.signal
+    })
     gallery.value = nextGallery
-    queryInput.value = nextGallery.q || ''
-    const pageQuery = pageParams.toString()
-    window.history.pushState(null, '', pageQuery ? `/app/list?${pageQuery}` : '/app/list')
+    // Only resync the box if the user has not typed something new meanwhile.
+    if (queryInput.value === typedQuery) queryInput.value = nextGallery.q || ''
+    if (push) {
+      const pageQuery = pageParams.toString()
+      window.history.pushState(null, '', pageQuery ? `/app/list?${pageQuery}` : '/app/list')
+    }
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') return
     notify(error instanceof Error ? error.message : '加载失败', 'danger')
   } finally {
-    loading.value = false
+    if (inflight === controller) {
+      inflight = null
+      loading.value = false
+    }
   }
+}
+
+/**
+ * Restores a history entry. Params are rebuilt purely from the URL rather than
+ * through buildQuery, which merges with current state and would leak stale
+ * filters; an absent `date` means today, so it must reset rather than persist.
+ */
+function applyLocation() {
+  const parsed = parseGalleryParams(window.location.search)
+  const params = new URLSearchParams()
+  if (parsed.date) params.set('date', parsed.date)
+  if (parsed.ext) params.set('ext', parsed.ext)
+  if (parsed.q) params.set('q', parsed.q)
+  if (parsed.num) params.set('num', String(parsed.num))
+  queryInput.value = parsed.q
+  void loadGallery({ num: parsed.num ?? gallery.value.limit }, { push: false, params })
 }
 
 function submitSearch() {
@@ -68,15 +100,6 @@ function submitSearch() {
 function clearSearch() {
   queryInput.value = ''
   void loadGallery({ q: '' })
-}
-
-async function copy(url: string) {
-  try {
-    await copyText(url)
-    notify('复制成功', 'success')
-  } catch {
-    notify('复制失败，请手动复制', 'danger')
-  }
 }
 
 function openImage(file: GalleryFile) {
@@ -94,6 +117,15 @@ function markThumbFailed(url: string) {
 function displayName(file: GalleryFile) {
   return file.original_name || file.name
 }
+
+onMounted(() => {
+  window.addEventListener('popstate', applyLocation)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('popstate', applyLocation)
+  inflight?.abort()
+})
 </script>
 
 <template>

@@ -3,7 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import type { AdminFileEntry, AdminFiler } from '../../types'
 import type { NoticeType } from '../../shared/notify'
 import { adminApi } from '../../shared/adminApi'
-import { copyText } from '../../shared/clipboard'
+import { runBatchDelete, summarizeBatchDelete } from '../../shared/batchDelete'
+import { formatSize } from '../../shared/format'
+import { useCopy } from '../../shared/useCopy'
 
 const emit = defineEmits<{ notice: [message: string, type?: NoticeType] }>()
 const loading = ref(true)
@@ -11,6 +13,10 @@ const data = ref<AdminFiler | null>(null)
 const failedThumbs = ref<Set<string>>(new Set())
 const queryInput = ref('')
 const selectedImage = ref<AdminFileEntry | null>(null)
+const selected = ref<Set<string>>(new Set())
+
+const notify = (message: string, type?: NoticeType) => emit('notice', message, type)
+const copy = useCopy(notify)
 
 const breadcrumbs = computed(() => {
   if (!data.value) return []
@@ -33,6 +39,44 @@ const filteredFiles = computed(() => {
 
 const totalItems = computed(() => dirs.value.length + files.value.length)
 
+// Selection is tracked against the filtered view, so "select all" follows the search box.
+const selectedFiles = computed(() => filteredFiles.value.filter(file => selected.value.has(file.url)))
+const selectedSize = computed(() => selectedFiles.value.reduce((sum, file) => sum + (file.size || 0), 0))
+const allSelected = computed(() => filteredFiles.value.length > 0 && selectedFiles.value.length === filteredFiles.value.length)
+
+function toggleFile(file: AdminFileEntry) {
+  const next = new Set(selected.value)
+  if (next.has(file.url)) next.delete(file.url)
+  else next.add(file.url)
+  selected.value = next
+}
+
+function toggleAll() {
+  selected.value = allSelected.value ? new Set() : new Set(filteredFiles.value.map(file => file.url))
+}
+
+async function removeSelected() {
+  const targets = selectedFiles.value
+  if (targets.length === 0) return
+  if (!window.confirm(`确认删除选中的 ${targets.length} 个文件（${formatSize(selectedSize.value)}）？此操作不可恢复。`)) return
+
+  const byUrl = new Map(targets.map(file => [file.url, file]))
+  const outcome = await runBatchDelete(
+    targets.map(file => file.url),
+    async url => adminApi.deleteFile(byUrl.get(url)!.path)
+  )
+  const deleted = new Set(outcome.succeeded)
+  if (data.value) data.value.files = files.value.filter(item => !deleted.has(item.url))
+  if (selectedImage.value && deleted.has(selectedImage.value.url)) selectedImage.value = null
+  selected.value = new Set([...selected.value].filter(url => !deleted.has(url)))
+  const summary = summarizeBatchDelete(outcome)
+  notify(summary.message, summary.type)
+}
+
+function copySelected() {
+  void copy(selectedFiles.value.map(file => file.url).join('\n'), `已复制 ${selectedFiles.value.length} 条链接`)
+}
+
 async function load(path?: string) {
   loading.value = true
   const params = new URLSearchParams()
@@ -43,22 +87,25 @@ async function load(path?: string) {
     payload.files = payload.files ?? []
     data.value = payload
     queryInput.value = ''
+    selected.value = new Set()
   } catch (error) {
     emit('notice', error instanceof Error ? error.message : '加载失败', 'danger')
   } finally { loading.value = false }
 }
 
-async function copy(url: string) { await copyText(url); emit('notice', '复制成功', 'success') }
-
 async function remove(file: AdminFileEntry) {
   if (!window.confirm('确认删除此文件？')) return
-  const result = await adminApi.deleteFile(file.path)
-  if (result.code === 200 && data.value) {
-    data.value.files = files.value.filter(item => item.url !== file.url)
-    if (selectedImage.value?.url === file.url) selectedImage.value = null
-    emit('notice', result.msg || '删除成功', 'success')
-  } else {
-    emit('notice', result.msg || '删除失败', 'danger')
+  try {
+    const result = await adminApi.deleteFile(file.path)
+    if (result.code === 200 && data.value) {
+      data.value.files = files.value.filter(item => item.url !== file.url)
+      if (selectedImage.value?.url === file.url) selectedImage.value = null
+      notify(result.msg || '删除成功', 'success')
+    } else {
+      notify(result.msg || '删除失败', 'danger')
+    }
+  } catch (error) {
+    notify(error instanceof Error ? error.message : '删除失败', 'danger')
   }
 }
 
@@ -138,10 +185,20 @@ onMounted(() => load())
           </form>
         </div>
 
+        <div v-if="filteredFiles.length && selectedFiles.length" class="batch-bar">
+          <span class="batch-count">已选 {{ selectedFiles.length }} 个文件 · {{ formatSize(selectedSize) }}</span>
+          <button type="button" class="btn btn-xs btn-primary" @click="copySelected">复制链接</button>
+          <button type="button" class="btn btn-xs btn-danger" @click="removeSelected">批量删除</button>
+          <button type="button" class="btn btn-xs btn-default" @click="selected = new Set()">取消选择</button>
+        </div>
+
         <div v-if="filteredFiles.length" class="file-table-wrap">
           <table class="table file-table">
             <thead>
               <tr>
+                <th class="select-col">
+                  <input type="checkbox" :checked="allSelected" aria-label="全选当前文件" @change="toggleAll">
+                </th>
                 <th class="thumb-col">预览</th>
                 <th>文件信息</th>
                 <th>格式</th>
@@ -151,7 +208,10 @@ onMounted(() => load())
               </tr>
             </thead>
         <tbody>
-          <tr v-for="file in filteredFiles" :key="file.url">
+          <tr v-for="file in filteredFiles" :key="file.url" :class="{ 'is-selected': selected.has(file.url) }">
+            <td class="select-col">
+              <input type="checkbox" :checked="selected.has(file.url)" :aria-label="`选择 ${displayName(file)}`" @change="toggleFile(file)">
+            </td>
             <td class="thumb-col">
               <button class="thumb-button" :title="`预览 ${displayName(file)}`" @click="selectedImage = file">
                 <span v-if="failedThumbs.has(file.url)" class="thumb-fallback"><i class="icon icon-file-image-o"></i></span>
@@ -194,6 +254,32 @@ onMounted(() => load())
 </template>
 
 <style scoped>
+.batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid #dbe6f8;
+  border-radius: 8px;
+  background: #f2f6fd;
+}
+.batch-count {
+  font-weight: 700;
+  color: #35507a;
+}
+.select-col {
+  width: 40px;
+  text-align: center;
+}
+.select-col input {
+  margin: 0;
+  cursor: pointer;
+}
+.file-table tbody tr.is-selected {
+  background: #eaf2ff;
+}
 .filer-loading {
   display: flex;
   align-items: center;

@@ -4,15 +4,19 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@vitejs/plugin-vue": "latest",
+    "typescript": "latest",
     "vite": "latest",
     "vite-plugin-pwa": "latest",
     "vue": "latest",
-    "vue-tsc": "latest",
-    "typescript": "latest"
+    "vue-tsc": "latest"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "happy-dom": "^20.11.6",
+    "vitest": "^4.1.11"
+  }
 }

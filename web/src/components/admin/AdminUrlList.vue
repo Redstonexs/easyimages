@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import type { AdminURLList } from '../../types'
 import type { NoticeType } from '../../shared/notify'
 import { adminApi } from '../../shared/adminApi'
-import { copyText } from '../../shared/clipboard'
+import { useCopy } from '../../shared/useCopy'
 
 const emit = defineEmits<{ notice: [message: string, type?: NoticeType] }>()
 const loading = ref(true)
@@ -11,21 +11,39 @@ const data = ref<AdminURLList | null>(null)
 const page = ref(1)
 const queryInput = ref('')
 
+const notify = (message: string, type?: NoticeType) => emit('notice', message, type)
+const copy = useCopy(notify)
+let inflight: AbortController | null = null
+
 async function load(nextPage = page.value) {
+  inflight?.abort()
+  const controller = new AbortController()
+  inflight = controller
+
   loading.value = true
-  page.value = nextPage
-  const params = new URLSearchParams({ page: String(page.value), page_size: '50' })
+  const params = new URLSearchParams({ page: String(nextPage), page_size: '50' })
   if (queryInput.value.trim()) params.set('q', queryInput.value.trim())
+  const typedQuery = queryInput.value
   try {
-    data.value = await adminApi.urlList(params)
-    queryInput.value = data.value.q || ''
-  } finally { loading.value = false }
+    data.value = await adminApi.urlList(params, { signal: controller.signal })
+    // Commit the page only once the matching response lands.
+    page.value = nextPage
+    if (queryInput.value === typedQuery) queryInput.value = data.value.q || ''
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') return
+    notify(error instanceof Error ? error.message : '加载图片列表失败', 'danger')
+  } finally {
+    if (inflight === controller) {
+      inflight = null
+      loading.value = false
+    }
+  }
 }
-async function copy(url: string) { await copyText(url); emit('notice', '复制成功', 'success') }
 function search() { void load(1) }
 function clearSearch() { queryInput.value = ''; void load(1) }
 function displayName(file: { name: string; original_name?: string }) { return file.original_name || file.name }
 onMounted(() => load())
+onUnmounted(() => inflight?.abort())
 </script>
 
 <template>
