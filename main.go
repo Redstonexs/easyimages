@@ -5,6 +5,7 @@ import (
 	"easyimage/internal/handler"
 	"easyimage/internal/middleware"
 	"easyimage/internal/service"
+	"easyimage/internal/workspace"
 	"fmt"
 	"html/template"
 	"log"
@@ -28,6 +29,10 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+	workspaceStore, err := workspace.Open(workspace.RuntimePath(cfg.Path), cfg.Path)
+	if err != nil {
+		log.Printf("Warning: could not open the image workspace: %v", err)
 	}
 
 	// 创建必要目录（cfg.Path 是 URL 路径如 "/i/"，文件系统路径需要 "." 前缀）
@@ -61,6 +66,9 @@ func main() {
 		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
+			if workspaceStore != nil {
+				workspaceStore.CollectDeleted()
+			}
 			entries, err := os.ReadDir(chunksDir)
 			if err != nil {
 				continue
@@ -206,13 +214,13 @@ func main() {
 	r.POST("/app/del_hash", handler.DeleteByHash(cfg))
 
 	// 登录API
-	r.POST("/api/login", handler.AdminLoginAPI(cfg))
+	r.POST("/api/login", handler.AdminLoginAPI(cfg, workspaceStore))
 	r.GET("/api/captcha", handler.CaptchaAPI(cfg))
 
 	// 上传路由
-	r.POST("/app/upload", middleware.CheckLogin(cfg), handler.Upload(cfg))
-	r.POST("/app/upload/chunk", middleware.CheckLogin(cfg), handler.ChunkUpload(cfg))
-	r.POST("/app/upload/chunk/cleanup", middleware.CheckLogin(cfg), handler.ChunkCleanup(cfg))
+	r.POST("/app/upload", middleware.LegacyUploadOnly, middleware.CheckLogin(cfg), handler.Upload(cfg))
+	r.POST("/app/upload/chunk", middleware.LegacyUploadOnly, middleware.CheckLogin(cfg), handler.ChunkUpload(cfg))
+	r.POST("/app/upload/chunk/cleanup", middleware.LegacyUploadOnly, middleware.CheckLogin(cfg), handler.ChunkCleanup(cfg))
 
 	// API路由
 	r.POST("/api/index", handler.APIUpload(cfg))
@@ -228,8 +236,8 @@ func main() {
 	// 管理后台
 	admin := r.Group("/admin")
 	{
-		admin.GET("/index", handler.AdminIndex(cfg))
-		admin.POST("/index", handler.AdminLogin(cfg))
+		admin.GET("/index", handler.AdminIndex(cfg, workspaceStore))
+		admin.POST("/index", handler.AdminLogin(cfg, workspaceStore))
 		admin.GET("/manager", middleware.RequireAdmin(cfg), handler.Manager(cfg))
 		admin.POST("/manager", middleware.RequireAdmin(cfg), handler.ManagerAction(cfg))
 		admin.POST("/batch-webp", middleware.RequireAdmin(cfg), handler.BatchWebP(cfg))
@@ -253,6 +261,7 @@ func main() {
 		api.GET("/filer", handler.AdminFilerAPI(cfg))
 		api.POST("/delete", handler.AdminDeleteAPI(cfg))
 	}
+	handler.RegisterWorkspaceRoutes(r, cfg, workspaceStore)
 
 	// 删除操作
 	r.POST("/app/del", middleware.CheckLogin(cfg), handler.DeleteAction(cfg))

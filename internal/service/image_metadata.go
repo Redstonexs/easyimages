@@ -33,7 +33,17 @@ type ImageMetadata struct {
 	ThumbURL      string `json:"thumb_url,omitempty"`
 }
 
-var imageMetadataMu sync.Mutex
+type metadataMonthCacheEntry struct {
+	exists  bool
+	modTime time.Time
+	size    int64
+	items   map[string]ImageMetadata
+}
+
+var (
+	imageMetadataMu    sync.RWMutex
+	imageMetadataCache = make(map[string]metadataMonthCacheEntry)
+)
 
 func SaveImageMetadata(relativePath, originalName string, size int64, from string, uploadedAt time.Time) {
 	SaveImageMetadataWithStorage(relativePath, originalName, size, from, uploadedAt, "local", "local", strings.TrimPrefix(relativePath, metadataStoragePrefix()), "", "")
@@ -84,14 +94,20 @@ func OriginalUploadName(name string) string {
 }
 
 func GetImageMetadata(relativePath string) (ImageMetadata, bool) {
-	imageMetadataMu.Lock()
-	defer imageMetadataMu.Unlock()
-
-	items, err := loadImageMetadataMonthLocked(metadataMonthFromPath(relativePath))
+	month := metadataMonthFromPath(relativePath)
+	metadataPath, err := safeImageMetadataMonthPath(month)
 	if err != nil {
 		return ImageMetadata{}, false
 	}
+
+	items, err := getImageMetadataMonth(metadataPath)
+	if err != nil || len(items) == 0 {
+		return ImageMetadata{}, false
+	}
+
+	imageMetadataMu.RLock()
 	metadata, ok := items[relativePath]
+	imageMetadataMu.RUnlock()
 	if ok {
 		metadata = normalizeImageMetadata(metadata)
 	}
@@ -102,11 +118,16 @@ func DeleteImageMetadata(relativePath string) {
 	if relativePath == "" {
 		return
 	}
+	month := metadataMonthFromPath(relativePath)
+	metadataPath, err := safeImageMetadataMonthPath(month)
+	if err != nil {
+		return
+	}
+
 	imageMetadataMu.Lock()
 	defer imageMetadataMu.Unlock()
 
-	month := metadataMonthFromPath(relativePath)
-	items, err := loadImageMetadataMonthLocked(month)
+	items, err := loadImageMetadataMonthLocked(metadataPath)
 	if err != nil || len(items) == 0 {
 		return
 	}
@@ -114,26 +135,32 @@ func DeleteImageMetadata(relativePath string) {
 		return
 	}
 	delete(items, relativePath)
-	if err := writeImageMetadataMonthLocked(month, items); err != nil {
+	if err := writeImageMetadataMonthLocked(metadataPath, items); err != nil {
 		log.Printf("[Metadata] delete failed for %s: %v", relativePath, err)
 	}
 }
 
 func LoadImageMetadataForDate(datePath string) map[string]ImageMetadata {
-	imageMetadataMu.Lock()
-	defer imageMetadataMu.Unlock()
+	month := metadataMonthFromDatePath(datePath)
+	metadataPath, err := safeImageMetadataMonthPath(month)
+	if err != nil {
+		return map[string]ImageMetadata{}
+	}
 
-	items, err := loadImageMetadataMonthLocked(metadataMonthFromDatePath(datePath))
+	items, err := getImageMetadataMonth(metadataPath)
 	if err != nil || len(items) == 0 {
 		return map[string]ImageMetadata{}
 	}
+
 	result := make(map[string]ImageMetadata)
 	needle := "/" + strings.Trim(datePath, "/") + "/"
-	for path, metadata := range items {
-		if strings.Contains(path, needle) {
-			result[path] = normalizeImageMetadata(metadata)
+	imageMetadataMu.RLock()
+	for p, metadata := range items {
+		if strings.Contains(p, needle) {
+			result[p] = normalizeImageMetadata(metadata)
 		}
 	}
+	imageMetadataMu.RUnlock()
 	return result
 }
 
@@ -141,7 +168,7 @@ func ListImageMetadataForDate(datePath string, sortDesc bool) []ImageMetadata {
 	items := LoadImageMetadataForDate(datePath)
 	list := make([]ImageMetadata, 0, len(items))
 	for _, metadata := range items {
-		list = append(list, normalizeImageMetadata(metadata))
+		list = append(list, metadata)
 	}
 	sort.Slice(list, func(i, j int) bool {
 		if sortDesc {
@@ -177,45 +204,92 @@ func MetadataMatchesQuery(metadata ImageMetadata, storedName, query string) bool
 }
 
 func saveImageMetadata(metadata ImageMetadata) error {
+	month := metadataMonthFromPath(metadata.Path)
+	metadataPath, err := safeImageMetadataMonthPath(month)
+	if err != nil {
+		return err
+	}
+
 	imageMetadataMu.Lock()
 	defer imageMetadataMu.Unlock()
 
-	month := metadataMonthFromPath(metadata.Path)
-	items, err := loadImageMetadataMonthLocked(month)
+	items, err := loadImageMetadataMonthLocked(metadataPath)
 	if err != nil {
 		return err
 	}
 	items[metadata.Path] = metadata
-	return writeImageMetadataMonthLocked(month, items)
+	return writeImageMetadataMonthLocked(metadataPath, items)
 }
 
-func loadImageMetadataMonthLocked(month string) (map[string]ImageMetadata, error) {
-	metadataPath, err := safeImageMetadataMonthPath(month)
-	if err != nil {
-		return nil, err
+// getImageMetadataMonth returns a cached monthly metadata map using RLock on
+// hits, validating against file stat so out-of-band updates or test chdir are
+// always observed without re-parsing the JSON on every lookup.
+func getImageMetadataMonth(metadataPath string) (map[string]ImageMetadata, error) {
+	info, statErr := os.Stat(metadataPath)
+	exists := statErr == nil
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return nil, statErr
 	}
+
+	imageMetadataMu.RLock()
+	cached, ok := imageMetadataCache[metadataPath]
+	if ok {
+		if !exists && !cached.exists {
+			imageMetadataMu.RUnlock()
+			return nil, nil
+		}
+		if exists && cached.exists && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
+			imageMetadataMu.RUnlock()
+			return cached.items, nil
+		}
+	}
+	imageMetadataMu.RUnlock()
+
+	imageMetadataMu.Lock()
+	defer imageMetadataMu.Unlock()
+	return loadImageMetadataMonthLocked(metadataPath)
+}
+
+func loadImageMetadataMonthLocked(metadataPath string) (map[string]ImageMetadata, error) {
+	info, statErr := os.Stat(metadataPath)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			empty := make(map[string]ImageMetadata)
+			imageMetadataCache[metadataPath] = metadataMonthCacheEntry{exists: false, items: empty}
+			return empty, nil
+		}
+		return nil, statErr
+	}
+
+	if cached, ok := imageMetadataCache[metadataPath]; ok && cached.exists && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
+		return cached.items, nil
+	}
+
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return map[string]ImageMetadata{}, nil
+			empty := make(map[string]ImageMetadata)
+			imageMetadataCache[metadataPath] = metadataMonthCacheEntry{exists: false, items: empty}
+			return empty, nil
 		}
 		return nil, err
 	}
 	items := make(map[string]ImageMetadata)
-	if len(data) == 0 {
-		return items, nil
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &items); err != nil {
+			return nil, err
+		}
 	}
-	if err := json.Unmarshal(data, &items); err != nil {
-		return nil, err
+	imageMetadataCache[metadataPath] = metadataMonthCacheEntry{
+		exists:  true,
+		modTime: info.ModTime(),
+		size:    info.Size(),
+		items:   items,
 	}
 	return items, nil
 }
 
-func writeImageMetadataMonthLocked(month string, items map[string]ImageMetadata) error {
-	metadataPath, err := safeImageMetadataMonthPath(month)
-	if err != nil {
-		return err
-	}
+func writeImageMetadataMonthLocked(metadataPath string, items map[string]ImageMetadata) error {
 	if err := os.MkdirAll(filepath.Dir(metadataPath), 0755); err != nil {
 		return err
 	}
@@ -223,13 +297,27 @@ func writeImageMetadataMonthLocked(month string, items map[string]ImageMetadata)
 		if err := os.Remove(metadataPath); err != nil && !os.IsNotExist(err) {
 			return err
 		}
+		imageMetadataCache[metadataPath] = metadataMonthCacheEntry{exists: false, items: items}
 		return nil
 	}
-	data, err := json.MarshalIndent(items, "", "  ")
+	data, err := json.Marshal(items)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(metadataPath, data, 0644)
+	if err := os.WriteFile(metadataPath, data, 0644); err != nil {
+		return err
+	}
+	if info, err := os.Stat(metadataPath); err == nil {
+		imageMetadataCache[metadataPath] = metadataMonthCacheEntry{
+			exists:  true,
+			modTime: info.ModTime(),
+			size:    info.Size(),
+			items:   items,
+		}
+	} else {
+		delete(imageMetadataCache, metadataPath)
+	}
+	return nil
 }
 
 func safeImageMetadataMonthPath(month string) (string, error) {
@@ -244,22 +332,8 @@ func safeImageMetadataMonthPath(month string) (string, error) {
 	if err != nil || monthNumber < 1 || monthNumber > 12 {
 		return "", fmt.Errorf("invalid metadata month")
 	}
-
-	baseDir, err := filepath.Abs(imageMetadataDir)
-	if err != nil {
-		return "", err
-	}
 	fileName := fmt.Sprintf("%04d-%02d.json", year, monthNumber)
-	targetPath := filepath.Join(baseDir, fileName)
-	relPath, err := filepath.Rel(baseDir, targetPath)
-	if err != nil {
-		return "", err
-	}
-	if relPath != fileName || filepath.IsAbs(relPath) {
-		return "", fmt.Errorf("invalid metadata path")
-	}
-
-	return filepath.Join(baseDir, relPath), nil
+	return filepath.Abs(filepath.Join(imageMetadataDir, fileName))
 }
 
 func metadataMonthFromPath(relativePath string) string {

@@ -19,13 +19,7 @@ const getFixedUrl = (req) => {
     var now = Date.now()
     var url = new URL(req.url)
 
-    // 1. fixed http URL
-    // Just keep syncing with location.protocol
-    // fetch(httpURL) belongs to active mixed content.
-    // And fetch(httpRequest) is not supported yet.
-    url.protocol = self.location.protocol
-
-    // 2. add query for caching-busting.
+    // Add a cache-busting query only to same-origin documentation.
     // Github Pages served with Cache-Control: max-age=600
     // max-age on mutable content is error-prone, with SW life of bugs can even extend.
     // Until cache mode of Fetch API landed, we have to workaround cache-busting with query string.

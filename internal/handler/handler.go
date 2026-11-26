@@ -4,6 +4,7 @@ import (
 	"easyimage/config"
 	"easyimage/internal/service"
 	"easyimage/internal/storage"
+	"easyimage/internal/workspace"
 	"fmt"
 	"io"
 	"log"
@@ -22,6 +23,10 @@ const maxChunkUploadParts = 10000
 
 func Index(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if session, ok := service.CurrentSession(c); ok && !session.IsAdmin {
+			c.Redirect(http.StatusFound, "/workspace")
+			return
+		}
 		if cfg.MustLogin == 1 && !service.IsLoggedIn(c) {
 			c.Redirect(http.StatusFound, loginRedirectURL(c))
 			return
@@ -95,8 +100,7 @@ func CaptchaAPI(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
-// AdminLoginAPI 管理员登录API
-func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
+func AdminLoginAPI(cfg *config.Config, store *workspace.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 检查登录速率限制
 		clientIP := c.ClientIP()
@@ -110,9 +114,6 @@ func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 
 		// 验证验证码
 		if cfg.Captcha == 1 {
-			log.Printf("[API Login] captcha=%d, captcha_type=%d, answer=%q, token=%q",
-				cfg.Captcha, cfg.CaptchaType,
-				c.PostForm("captcha_answer"), c.PostForm("captcha_token"))
 			ok, msg := service.VerifyCaptcha(cfg,
 				c.PostForm("captcha_answer"),
 				c.PostForm("captcha_token"),
@@ -133,23 +134,39 @@ func AdminLoginAPI(cfg *config.Config) gin.HandlerFunc {
 		password := c.PostForm("password")
 
 		// 验证用户名密码
-		success, message := service.ValidateLogin(user, password, cfg)
-		if success {
+		session, ok := accountLogin(cfg, store, user, password)
+		if ok {
+			if err := service.SetSession(c, cfg, session); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"result": "failed", "message": "无法建立登录会话"})
+				return
+			}
 			service.ResetLoginAttempts(clientIP)
-			service.SetAdminSession(c, user)
-			c.JSON(http.StatusOK, gin.H{
+			result := gin.H{
 				"result":  "success",
 				"message": "登录成功",
-			})
+			}
+			if !session.IsAdmin {
+				result["redirect"] = "/workspace"
+			}
+			c.JSON(http.StatusOK, result)
 			return
 		}
 
 		service.RecordFailedLogin(clientIP)
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"result":  "failed",
-			"message": message,
+			"message": "用户名或密码错误",
 		})
 	}
+}
+
+func accountLogin(cfg *config.Config, store *workspace.Store, user, password string) (service.Session, bool) {
+	if user == cfg.User || store == nil {
+		ok, _ := service.ValidateLogin(user, password, cfg)
+		return service.Session{IsAdmin: ok}, ok
+	}
+	actor, ok := store.Login(user, password)
+	return service.Session{UserID: actor.ID, AuthVersion: actor.AuthVersion}, ok
 }
 
 func List(cfg *config.Config) gin.HandlerFunc {
@@ -887,12 +904,19 @@ func InstallAction(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
-func AdminIndex(cfg *config.Config) gin.HandlerFunc {
+func AdminIndex(cfg *config.Config, store *workspace.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		redirect := safeLoginRedirect(c.Query("redirect"), "/admin/manager")
 		if service.IsAdmin(c) {
 			c.Redirect(http.StatusFound, redirect)
 			return
+		}
+		if session, ok := service.CurrentSession(c); ok {
+			if store != nil && store.Authorized(workspace.Identity{ID: session.UserID, AuthVersion: session.AuthVersion}) {
+				c.Redirect(http.StatusFound, "/workspace")
+				return
+			}
+			service.ClearSession(c, cfg)
 		}
 
 		captchaData := service.GenerateCaptcha(cfg)
@@ -904,7 +928,7 @@ func AdminIndex(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
-func AdminLogin(cfg *config.Config) gin.HandlerFunc {
+func AdminLogin(cfg *config.Config, store *workspace.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		redirect := safeLoginRedirect(c.PostForm("redirect"), "/admin/manager")
 
@@ -920,9 +944,6 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		// 验证验证码
-		log.Printf("[Login] captcha=%d, captcha_type=%d, answer=%q, token=%q",
-			cfg.Captcha, cfg.CaptchaType,
-			c.PostForm("captcha_answer"), c.PostForm("captcha_token"))
 		if cfg.Captcha == 1 {
 			ok, msg := service.VerifyCaptcha(cfg,
 				c.PostForm("captcha_answer"),
@@ -933,8 +954,6 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 			)
 			if !ok {
 				captchaData := service.GenerateCaptcha(cfg)
-				log.Printf("[Login page] captcha=%d, captcha_type=%d, captcha_data_type=%s, question=%q",
-					cfg.Captcha, cfg.CaptchaType, captchaData.Type, captchaData.Question)
 				c.HTML(http.StatusOK, "admin_login.html", gin.H{
 					"config":   cfg,
 					"error":    msg,
@@ -948,10 +967,18 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 		user := c.PostForm("user")
 		password := c.PostForm("password")
 
-		success, message := service.ValidateLogin(user, password, cfg)
-		if success {
+		session, ok := accountLogin(cfg, store, user, password)
+		if ok {
+			if err := service.SetSession(c, cfg, session); err != nil {
+				c.HTML(http.StatusInternalServerError, "admin_login.html", gin.H{
+					"config": cfg, "error": "无法建立登录会话", "captcha": service.GenerateCaptcha(cfg), "redirect": redirect,
+				})
+				return
+			}
 			service.ResetLoginAttempts(clientIP)
-			service.SetAdminSession(c, user)
+			if !session.IsAdmin {
+				redirect = "/workspace"
+			}
 			c.Redirect(http.StatusFound, redirect)
 			return
 		}
@@ -960,7 +987,7 @@ func AdminLogin(cfg *config.Config) gin.HandlerFunc {
 		captchaData := service.GenerateCaptcha(cfg)
 		c.HTML(http.StatusOK, "admin_login.html", gin.H{
 			"config":   cfg,
-			"error":    message,
+			"error":    "用户名或密码错误",
 			"captcha":  captchaData,
 			"redirect": redirect,
 		})

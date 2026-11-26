@@ -36,6 +36,7 @@ config/install.lock
 config/EasyImage.lock
 config/php_backup/
 config/site-icon/
+config/workspace/
 
 # Logs
 admin/logs/

@@ -12,8 +12,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"math/big"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -22,9 +24,9 @@ import (
 	"time"
 
 	"easyimage/config"
+	"easyimage/internal/imageutil"
 	"easyimage/internal/storage"
 
-	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/hkdf"
@@ -32,20 +34,53 @@ import (
 
 // ==================== Session 管理 ====================
 
-// session 存储结构
-type sessionData struct {
-	User      string
-	IsAdmin   bool
-	CreatedAt time.Time
+type Session struct {
+	UserID      string
+	AuthVersion uint64
+	IsAdmin     bool
+	CreatedAt   time.Time
 }
 
 var (
-	sessionStore sync.Map // map[token]sessionData
+	sessionStore sync.Map // map[token]Session
 )
 
 const sessionMaxAge = 14 * 24 * time.Hour // 14天过期
 
-var thumbnailLocks sync.Map // map[thumbPath]*sync.Mutex
+type thumbLockEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+var (
+	thumbnailLocksMu sync.Mutex
+	thumbnailLocks   = make(map[string]*thumbLockEntry)
+
+	derivedKeyMu    sync.RWMutex
+	derivedKeyCache = make(map[string][]byte)
+)
+
+func lockThumbnail(thumbPath string) func() {
+	thumbnailLocksMu.Lock()
+	entry := thumbnailLocks[thumbPath]
+	if entry == nil {
+		entry = &thumbLockEntry{}
+		thumbnailLocks[thumbPath] = entry
+	}
+	entry.refs++
+	thumbnailLocksMu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		thumbnailLocksMu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(thumbnailLocks, thumbPath)
+		}
+		thumbnailLocksMu.Unlock()
+	}
+}
 
 func init() {
 	// 定时清理过期 session（每小时一次），避免在登录路径上遍历整个 sync.Map
@@ -71,7 +106,7 @@ func generateSessionToken() (string, error) {
 func cleanExpiredSessions() {
 	now := time.Now()
 	sessionStore.Range(func(key, value interface{}) bool {
-		if s, ok := value.(sessionData); ok {
+		if s, ok := value.(Session); ok {
 			if now.Sub(s.CreatedAt) > sessionMaxAge {
 				sessionStore.Delete(key)
 			}
@@ -139,79 +174,59 @@ func ResetLoginAttempts(ip string) {
 	delete(loginAttempts, ip)
 }
 
-// IsLoggedIn 检查是否已登录
+func CurrentSession(c *gin.Context) (Session, bool) {
+	token, err := c.Cookie("session")
+	if err != nil || token == "" {
+		return Session{}, false
+	}
+
+	value, ok := sessionStore.Load(token)
+	if !ok {
+		return Session{}, false
+	}
+
+	session := value.(Session)
+	if time.Since(session.CreatedAt) > sessionMaxAge {
+		sessionStore.Delete(token)
+		return Session{}, false
+	}
+	return session, true
+}
+
 func IsLoggedIn(c *gin.Context) bool {
-	token, err := c.Cookie("session")
-	if err != nil || token == "" {
-		return false
-	}
-
-	value, ok := sessionStore.Load(token)
-	if !ok {
-		return false
-	}
-
-	session, ok := value.(sessionData)
-	if !ok {
-		return false
-	}
-
-	// 检查 session 是否过期
-	if time.Since(session.CreatedAt) > sessionMaxAge {
-		sessionStore.Delete(token)
-		return false
-	}
-
-	return true
+	_, ok := CurrentSession(c)
+	return ok
 }
 
-// IsAdmin 检查是否管理员
 func IsAdmin(c *gin.Context) bool {
-	token, err := c.Cookie("session")
-	if err != nil || token == "" {
-		return false
-	}
-
-	value, ok := sessionStore.Load(token)
-	if !ok {
-		return false
-	}
-
-	session, ok := value.(sessionData)
-	if !ok {
-		return false
-	}
-
-	// 检查 session 是否过期
-	if time.Since(session.CreatedAt) > sessionMaxAge {
-		sessionStore.Delete(token)
-		return false
-	}
-
-	return session.IsAdmin
+	session, ok := CurrentSession(c)
+	return ok && session.IsAdmin
 }
 
-// SetAdminSession 设置管理员会话
-func SetAdminSession(c *gin.Context, user string) {
-	cfg := config.Get()
-
-	// 生成安全的随机 token
+func SetSession(c *gin.Context, cfg *config.Config, session Session) error {
 	token, err := generateSessionToken()
 	if err != nil {
-		return
+		return err
 	}
+	if old, err := c.Cookie("session"); err == nil {
+		sessionStore.Delete(old)
+	}
+	session.CreatedAt = time.Now()
+	sessionStore.Store(token, session)
+	setSessionCookie(c, cfg, token, int(sessionMaxAge.Seconds()))
+	return nil
+}
 
-	// 存储 session 数据
-	sessionStore.Store(token, sessionData{
-		User:      user,
-		IsAdmin:   user == cfg.User,
-		CreatedAt: time.Now(),
-	})
+func ClearSession(c *gin.Context, cfg *config.Config) {
+	if old, err := c.Cookie("session"); err == nil {
+		sessionStore.Delete(old)
+	}
+	setSessionCookie(c, cfg, "", -1)
+}
 
-	// 设置HttpOnly标志，防止客户端脚本访问cookie
-	// secure参数根据域名是否为https来判断
-	secure := strings.HasPrefix(cfg.Domain, "https")
-	c.SetCookie("session", token, 3600*24*14, "/", "", secure, true)
+func setSessionCookie(c *gin.Context, cfg *config.Config, value string, maxAge int) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("session", value, maxAge, "/", "", strings.HasPrefix(cfg.Domain, "https"), true)
 }
 
 // HashPassword 使用bcrypt对密码进行哈希
@@ -227,12 +242,8 @@ func HashPassword(password string) string {
 // CheckPassword 检查密码是否匹配
 // 支持bcrypt和SHA256（向后兼容PHP版本）
 func CheckPassword(password, hashedPassword string) bool {
-	// 检查是否是bcrypt格式（以$2a$或$2b$开头）
-	if len(hashedPassword) >= 4 && hashedPassword[0] == '$' && hashedPassword[2] == '$' {
-		// 尝试bcrypt验证
-		if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password)); err == nil {
-			return true
-		}
+	if strings.HasPrefix(hashedPassword, "$2") {
+		return bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password)) == nil
 	}
 
 	// 旧格式验证：用于兼容从PHP版本迁移的密码（SHA256格式）
@@ -290,13 +301,28 @@ func generateUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
-// deriveKey 使用HKDF从密钥材料派生安全的加密密钥
+// deriveKey 使用HKDF从密钥材料派生安全的加密密钥，并按 secret+salt 缓存结果。
 func deriveKey(secret []byte, salt []byte) ([]byte, error) {
+	cacheKey := string(salt) + "\x00" + string(secret)
+	derivedKeyMu.RLock()
+	if key, ok := derivedKeyCache[cacheKey]; ok {
+		derivedKeyMu.RUnlock()
+		return key, nil
+	}
+	derivedKeyMu.RUnlock()
+
 	key := make([]byte, 16) // AES-128需要16字节密钥
 	hkdfReader := hkdf.New(sha256.New, secret, salt, []byte("easyimage-encryption-key"))
 	if _, err := io.ReadFull(hkdfReader, key); err != nil {
 		return nil, fmt.Errorf("failed to derive key: %w", err)
 	}
+
+	derivedKeyMu.Lock()
+	if len(derivedKeyCache) > 32 {
+		clear(derivedKeyCache)
+	}
+	derivedKeyCache[cacheKey] = key
+	derivedKeyMu.Unlock()
 	return key, nil
 }
 
@@ -474,25 +500,27 @@ func GetDirList(dirPath string) []string {
 	return dirs
 }
 
-// GetFileCount 获取文件数量
+// GetFileCount 获取匹配模式的文件数量（使用 ReadDir 避免 Glob 排序与全路径分配）
 func GetFileCount(pattern string) int {
-	// 验证模式字符串安全性
 	if err := validateGlobPattern(pattern); err != nil {
 		return 0
 	}
-
-	matches, err := filepath.Glob(pattern)
+	dir, filePattern := filepath.Split(pattern)
+	if dir == "" || filePattern == "" {
+		return 0
+	}
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0
 	}
-
-	// filepath.Glob 不会返回目录，直接返回匹配数
 	count := 0
-	for _, match := range matches {
-		if err := validateMatchedPath(match); err != nil {
+	for _, entry := range entries {
+		if entry.IsDir() {
 			continue
 		}
-		count++
+		if matched, err := filepath.Match(filePattern, entry.Name()); err == nil && matched {
+			count++
+		}
 	}
 	return count
 }
@@ -500,11 +528,11 @@ func GetFileCount(pattern string) int {
 // GetFileCountRecursive 递归获取文件数量
 func GetFileCountRecursive(dir string) int {
 	count := 0
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if !info.IsDir() {
+		if !d.IsDir() {
 			count++
 		}
 		return nil
@@ -515,11 +543,12 @@ func GetFileCountRecursive(dir string) int {
 // CountFilesByExt 按扩展名统计文件
 func CountFilesByExt(dir, ext string) int {
 	count := 0
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	suffix := "." + strings.ToLower(ext)
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), "."+ext) {
+		if !d.IsDir() && strings.HasSuffix(strings.ToLower(d.Name()), suffix) {
 			count++
 		}
 		return nil
@@ -530,28 +559,22 @@ func CountFilesByExt(dir, ext string) int {
 // GetFileListRecursive 递归获取目录下所有文件的相对路径（跳过系统内部目录）
 func GetFileListRecursive(dir string) []string {
 	var files []string
-	// 确保dir以/结尾
-	if !strings.HasSuffix(dir, "/") {
-		dir += "/"
-	}
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	cleanDir := filepath.Clean(dir)
+	_ = filepath.WalkDir(cleanDir, func(entryPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		// 跳过系统内部目录（cache、suspic、recycle、chunks、admin）
-		if info.IsDir() && path != dir {
-			rel, err := filepath.Rel(dir, path)
-			if err == nil && isInternalPath(filepath.ToSlash(rel)) {
-				return filepath.SkipDir
+		if d.IsDir() {
+			if entryPath != cleanDir && internalDirs[d.Name()] {
+				rel, relErr := filepath.Rel(cleanDir, entryPath)
+				if relErr == nil && isInternalPath(filepath.ToSlash(rel)) {
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}
-		if !info.IsDir() {
-			// 返回相对于dir的路径
-			rel, err := filepath.Rel(dir, path)
-			if err == nil {
-				files = append(files, filepath.ToSlash(rel))
-			}
+		if rel, relErr := filepath.Rel(cleanDir, entryPath); relErr == nil {
+			files = append(files, filepath.ToSlash(rel))
 		}
 		return nil
 	})
@@ -580,23 +603,14 @@ func validateGlobPattern(pattern string) error {
 	return nil
 }
 
-// validateMatchedPath 验证匹配的文件路径安全性
-func validateMatchedPath(path string) error {
-	// 检查是否包含路径遍历组件
-	if strings.Contains(path, "..") {
-		return fmt.Errorf("invalid path: contains path traversal")
-	}
-	return nil
-}
-
 // GetDirectorySize 获取目录大小
-func GetDirectorySize(path string) int64 {
+func GetDirectorySize(dir string) int64 {
 	var size int64
-	filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
 			return nil
 		}
-		if !info.IsDir() {
+		if info, infoErr := d.Info(); infoErr == nil {
 			size += info.Size()
 		}
 		return nil
@@ -606,33 +620,44 @@ func GetDirectorySize(path string) int64 {
 
 // DirStats 目录统计结果
 type DirStats struct {
-	TotalFiles int
-	TotalSize  int64
-	ByExt      map[string]int
+	TotalFiles  int
+	TotalSize   int64
+	ByExt       map[string]int
+	DailyCounts map[string]int
 }
 
-// CollectDirStats 单次遍历收集目录的文件数、总大小和按扩展名统计。
-// 替代多次 GetFileCountRecursive + GetDirectorySize + CountFilesByExt 调用。
+// CollectDirStats 单次遍历收集目录的文件数、总大小、按扩展名及按 YYYY/MM/DD 日期统计。
 func CollectDirStats(dir string) DirStats {
-	stats := DirStats{ByExt: make(map[string]int)}
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	stats := DirStats{
+		ByExt:       make(map[string]int),
+		DailyCounts: make(map[string]int),
+	}
+	cleanDir := filepath.Clean(dir)
+	_ = filepath.WalkDir(cleanDir, func(entryPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if info.IsDir() {
-			if path != dir {
-				rel, err := filepath.Rel(dir, path)
-				if err == nil && isInternalPath(filepath.ToSlash(rel)) {
+		if d.IsDir() {
+			if entryPath != cleanDir && internalDirs[d.Name()] {
+				rel, relErr := filepath.Rel(cleanDir, entryPath)
+				if relErr == nil && isInternalPath(filepath.ToSlash(rel)) {
 					return filepath.SkipDir
 				}
 			}
 			return nil
 		}
 		stats.TotalFiles++
-		stats.TotalSize += info.Size()
-		ext := strings.ToLower(filepath.Ext(info.Name()))
-		if ext != "" {
+		if info, infoErr := d.Info(); infoErr == nil {
+			stats.TotalSize += info.Size()
+		}
+		if ext := strings.ToLower(filepath.Ext(d.Name())); ext != "" {
 			stats.ByExt[ext]++
+		}
+		if rel, relErr := filepath.Rel(cleanDir, entryPath); relErr == nil {
+			slashRel := filepath.ToSlash(rel)
+			if len(slashRel) > 10 && slashRel[4] == '/' && slashRel[7] == '/' && slashRel[10] == '/' {
+				stats.DailyCounts[slashRel[:10]]++
+			}
 		}
 		return nil
 	})
@@ -818,45 +843,36 @@ func GetImageInfo(img string, cfg *config.Config) (map[string]interface{}, error
 
 // GenerateThumbnail 生成缩略图
 func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
-	// 验证并获取安全路径（getSafePath 内部使用 Rel+Join 打断污点链）
-	cleanPath, err := getSafePath(img)
+	// 验证并获取安全路径（getSafePathWithConfig 内部使用 Rel+Join 打断污点链）
+	cleanPath, err := getSafePathWithConfig(img, cfg)
 	if err != nil {
 		return "", err
 	}
 
-	// 缓存目录
 	baseDir, _ := filepath.Abs(filepath.Join(".", cfg.Path))
 	cacheDir := filepath.Join(baseDir, "cache")
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create cache directory: %w", err)
-	}
-
-	// 缩略图文件名 - 使用安全的文件名
 	relFromBase, _ := filepath.Rel(baseDir, cleanPath)
 	thumbName := sanitizeFilename(strings.ReplaceAll(relFromBase, string(filepath.Separator), "_"))
 	thumbPath := filepath.Join(cacheDir, thumbName)
 
-	// 检查缓存是否存在
+	// 命中缓存直接返回，无需每次调用 os.MkdirAll
 	if _, err := os.Stat(thumbPath); err == nil {
 		return thumbPath, nil
 	}
 
-	lockValue, _ := thumbnailLocks.LoadOrStore(thumbPath, &sync.Mutex{})
-	thumbLock := lockValue.(*sync.Mutex)
-	thumbLock.Lock()
-	defer func() {
-		thumbLock.Unlock()
-		thumbnailLocks.Delete(thumbPath)
-	}()
+	unlock := lockThumbnail(thumbPath)
+	defer unlock()
 
-	// Double-check after acquiring the per-thumbnail lock. This prevents cache
-	// stampedes when many clients request the same uncached thumbnail.
+	// Double-check after acquiring the per-thumbnail lock to avoid cache stampedes.
 	if _, err := os.Stat(thumbPath); err == nil {
 		return thumbPath, nil
+	}
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
 	// 打开原始图片（cleanPath 由 getSafePath 通过 Rel+Join 重建，非污点值）
-	srcImg, err := imaging.Open(cleanPath)
+	srcImg, err := imageutil.Open(cleanPath)
 	if err != nil {
 		// 如果无法打开（如非图片文件），复制原文件
 		src, err := os.Open(cleanPath)
@@ -876,10 +892,11 @@ func GenerateThumbnail(img string, cfg *config.Config) (string, error) {
 	}
 
 	// 生成缩略图 - 居中裁剪
-	thumbImg := imaging.Fill(srcImg, cfg.ThumbnailW, cfg.ThumbnailH, imaging.Center, imaging.Lanczos)
+	cropped := imageutil.CropToRatio(srcImg, cfg.ThumbnailW, cfg.ThumbnailH)
+	thumbImg := imageutil.Resize(cropped, cfg.ThumbnailW, cfg.ThumbnailH)
 
 	// 保存缩略图
-	err = imaging.Save(thumbImg, thumbPath)
+	err = imageutil.Save(thumbImg, thumbPath, imageutil.EncodeOptions{})
 	return thumbPath, err
 }
 

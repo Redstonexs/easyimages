@@ -36,6 +36,7 @@ config/api_key.json
 config/install.lock
 config/EasyImage.lock
 config/php_backup
+config/workspace
 
 # Temporary files
 *.tmp

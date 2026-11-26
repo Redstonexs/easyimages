@@ -2,8 +2,9 @@
 
 ## 环境要求
 
-- Go 1.21+
-- Node.js 22+，用于构建前端资源
+- Go 1.27.4 或更新版本
+- Node.js 26.13.1 或更新的 LTS 版本，用于构建前端资源
+- Docker 和 CI 使用已修补传递依赖的 npm 12.2.3
 - 可选：Docker / Docker Compose
 - 可选：`cwebp`，用于启用 WebP 转换
 

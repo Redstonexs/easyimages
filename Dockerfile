@@ -1,6 +1,11 @@
-FROM node:22-alpine AS frontend
+FROM node:26.13.1-alpine3.24@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS frontend
+
+RUN apk upgrade --no-cache
 
 WORKDIR /build
+
+COPY scripts/setup-npm.sh ./
+RUN sh setup-npm.sh
 
 COPY package.json package-lock.json* ./
 RUN npm ci
@@ -9,12 +14,13 @@ COPY vite.config.ts tsconfig.json ./
 COPY web ./web
 RUN npm run build
 
-FROM golang:1.21-alpine AS builder
+FROM golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS builder
 
 ARG VERSION=3.0.0
 
-# 安装依赖
-RUN apk add --no-cache gcc musl-dev
+ENV GOTOOLCHAIN=local
+
+RUN apk upgrade --no-cache
 
 # 设置工作目录
 WORKDIR /build
@@ -36,10 +42,10 @@ RUN rm -f config/config.json config/config.guest.json config/api_key.json config
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w -X easyimage/config.Version=${VERSION}" -o easyimage .
 
 # 最终镜像
-FROM alpine:latest
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
 # 安装运行时依赖（libwebp-tools 提供 cwebp 命令，用于 WebP 编码）
-RUN apk add --no-cache \
+RUN apk upgrade --no-cache && apk add --no-cache \
     ca-certificates \
     tzdata \
     libwebp-tools \

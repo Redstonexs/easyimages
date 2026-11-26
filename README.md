@@ -1,6 +1,6 @@
 # EasyImage
 
-[![Go](https://img.shields.io/badge/go-1.21+-00ADD8.svg)](https://go.dev/)
+[![Go](https://img.shields.io/badge/go-1.27.4+-00ADD8.svg)](https://go.dev/)
 [![Release](https://img.shields.io/github/v/release/Redstonexs/easyimages)](https://github.com/Redstonexs/easyimages/releases)
 [![License](https://img.shields.io/badge/license-GPL_V2.0-yellowgreen.svg)](LICENSE)
 
@@ -12,6 +12,8 @@ EasyImage 是一个无数据库图床服务。当前仓库已以 Go 版本为主
 - 无数据库，图片默认存储在 `i/`
 - 支持 Web 上传、粘贴上传和 API 上传
 - 支持管理员后台、上传历史、图片列表和文件管理
+- 图片库支持租户账号、存储配额、内部目录和可配置的公开链接
+- 支持按请求转换图像，也可在指定目录保存 JPEG、PNG 和 WebP 版本
 - 支持缩略图、压缩、水印、WebP 转换和热链保护
 - 支持从旧 PHP 配置自动迁移到 Go JSON 配置
 - 支持 Docker / Docker Compose 部署
@@ -45,6 +47,9 @@ docker-compose up -d
 - 安装页：`GET /install/`
 - 管理登录：`GET /admin/index`
 - 管理后台：`GET /admin/manager`
+- 图片库（管理员）：`GET /admin/workspace`
+- 图片库（租户）：`GET /workspace`
+- 图片库接口规范：`GET /api/v1/openapi.json`
 - Web 上传：`POST /app/upload`
 - API 上传：`POST /api/index`
 - 缩略图：`GET /app/thumb?img=/i/...`
@@ -75,6 +80,8 @@ curl -X POST http://localhost:8080/api/index \
 ```
 
 运行态文件不会提交到仓库：`config/config.json`、`config/config.guest.json`、`config/api_key.json`、`config/install.lock`、`config/php_backup/`、`admin/logs/` 和 `i/`。
+
+图片库账号、目录、配额和图片文件保存在 `admin/logs/workspace/`。旧图片、S3 对象和原有上传接口沿用原来的存储与链接。图片库用法见 [API 文档](docs/API.md#图片库-api-v1)。
 
 ## 配置和迁移
 

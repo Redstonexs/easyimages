@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -62,7 +61,7 @@ func SaveMultipartState(state MultipartState) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(state, "", "  ")
+	data, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
@@ -89,15 +88,5 @@ func multipartStatePath(uploadID string) (string, error) {
 			return "", fmt.Errorf("invalid upload id")
 		}
 	}
-	base, err := filepath.Abs(multipartStateDir)
-	if err != nil {
-		return "", err
-	}
-	name := strings.TrimSpace(uploadID) + ".json"
-	target := filepath.Join(base, name)
-	rel, err := filepath.Rel(base, target)
-	if err != nil || rel != name || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("invalid upload id")
-	}
-	return filepath.Join(base, rel), nil
+	return filepath.Join(multipartStateDir, uploadID+".json"), nil
 }

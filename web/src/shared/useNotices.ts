@@ -1,20 +1,19 @@
-import { ref } from 'vue'
-import type { Notice, NoticeType } from './notify'
-import { createNotice } from './notify'
+import { toast } from 'sonner'
+import type { NoticeType } from './notify'
 
-const DISMISS_AFTER = 3600
-
-/** Toast list plus its auto-dismiss timer, shared by the three island roots. */
-export function useNotices(dismissAfter = DISMISS_AFTER) {
-  const notices = ref<Notice[]>([])
-
-  function notify(message: string, type: NoticeType = 'info') {
-    const notice = createNotice(message, type)
-    notices.value.push(notice)
-    window.setTimeout(() => {
-      notices.value = notices.value.filter(item => item.id !== notice.id)
-    }, dismissAfter)
+export function notifyToast(message: string, type: NoticeType = 'info'): void {
+  switch (type) {
+    case 'success':
+      toast.success(message)
+      break
+    case 'danger':
+      toast.error(message)
+      break
+    case 'warning':
+      toast.warning(message)
+      break
+    default:
+      toast(message)
+      break
   }
-
-  return { notices, notify }
 }

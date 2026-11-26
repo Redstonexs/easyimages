@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"easyimage/config"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -33,6 +33,8 @@ type S3Store struct {
 	client S3Client
 }
 
+var s3StoreCache sync.Map // map[config.StorageSourceConfig]*S3Store
+
 func NewS3Store(ctx context.Context, source config.StorageSourceConfig) (*S3Store, error) {
 	if source.S3Bucket == "" {
 		return nil, fmt.Errorf("s3 bucket is required")
@@ -40,24 +42,26 @@ func NewS3Store(ctx context.Context, source config.StorageSourceConfig) (*S3Stor
 	if source.S3Region == "" {
 		source.S3Region = "auto"
 	}
-	resolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-		if source.S3Endpoint != "" {
-			return aws.Endpoint{URL: source.S3Endpoint, SigningRegion: source.S3Region}, nil
-		}
-		return aws.Endpoint{}, &aws.EndpointNotFoundError{}
-	})
-	cfg, err := awsconfig.LoadDefaultConfig(ctx,
-		awsconfig.WithRegion(source.S3Region),
-		awsconfig.WithEndpointResolverWithOptions(resolver),
-		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(source.S3AccessKeyID, source.S3AccessKeySecret, "")),
-	)
-	if err != nil {
-		return nil, err
+	if cached, ok := s3StoreCache.Load(source); ok {
+		return cached.(*S3Store), nil
+	}
+	cfg := aws.Config{
+		Region:      source.S3Region,
+		Credentials: credentials.NewStaticCredentialsProvider(source.S3AccessKeyID, source.S3AccessKeySecret, ""),
 	}
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.UsePathStyle = source.S3ForcePathStyle
+		if source.S3Endpoint != "" {
+			o.BaseEndpoint = aws.String(source.S3Endpoint)
+			// Third-party S3 endpoints may not support the SDK's optional
+			// checksum headers or streaming trailers on uploads.
+			o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+			o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
+		}
 	})
-	return &S3Store{source: source, client: client}, nil
+	store := &S3Store{source: source, client: client}
+	actual, _ := s3StoreCache.LoadOrStore(source, store)
+	return actual.(*S3Store), nil
 }
 
 func NewS3StoreWithClient(source config.StorageSourceConfig, client S3Client) *S3Store {

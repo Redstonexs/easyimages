@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"easyimage/config"
@@ -84,26 +85,41 @@ func capConfigured(cfg *config.Config) bool {
 	return cfg.CapInstanceURL != "" && cfg.CapSiteKey != "" && cfg.CapSecretKey != ""
 }
 
-// generateCaptchaHMACKey derives a key from config password using HKDF-SHA256.
-// HKDF (RFC 5869) is a proper KDF designed for key derivation from a shared secret.
+var (
+	captchaHMACMu     sync.RWMutex
+	captchaHMACSecret string
+	captchaHMACDerived []byte
+)
+
+// generateCaptchaHMACKey derives a key from config password using HKDF-SHA256
+// and caches it for the current secret.
 func generateCaptchaHMACKey() []byte {
 	secret := ""
-	// config.Get() returns nil until the config has been loaded. Fall back to the
-	// constant rather than panicking — the empty-password path already does.
 	if cfg := config.Get(); cfg != nil {
 		secret = cfg.Password
 	}
 	if secret == "" {
 		secret = captchaHMACKey
 	}
-	// HKDF(secret, salt, info) → key material
-	// salt = captchaHMACKey constant, info = "captcha-hmac-key"
+
+	captchaHMACMu.RLock()
+	if captchaHMACDerived != nil && captchaHMACSecret == secret {
+		key := captchaHMACDerived
+		captchaHMACMu.RUnlock()
+		return key
+	}
+	captchaHMACMu.RUnlock()
+
 	hkdfReader := hkdf.New(sha256.New, []byte(secret), []byte(captchaHMACKey), []byte("captcha-hmac-key"))
-	key := make([]byte, 32) // SHA-256 output size
+	key := make([]byte, 32)
 	if _, err := io.ReadFull(hkdfReader, key); err != nil {
-		// Should never happen with a 32-byte request from SHA-256 HKDF
 		log.Printf("[Captcha] HKDF key derivation failed: %v", err)
 	}
+
+	captchaHMACMu.Lock()
+	captchaHMACSecret = secret
+	captchaHMACDerived = key
+	captchaHMACMu.Unlock()
 	return key
 }
 

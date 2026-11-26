@@ -89,6 +89,7 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 	total := 0
 	seen := make(map[string]bool, len(metadataItems))
 	for _, metadata := range metadataItems {
+		seen[metadata.Path] = true
 		name := metadata.StoredName
 		if name == "" {
 			name = metadata.Path[strings.LastIndex(metadata.Path, "/")+1:]
@@ -107,7 +108,6 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 			continue
 		}
 		relativePath := metadata.Path
-		seen[relativePath] = true
 		files = append(files, imageListFile{
 			Name:         name,
 			OriginalName: metadata.OriginalName,
@@ -135,8 +135,9 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 		if seen[relativePath] {
 			continue
 		}
-		metadata, _ := service.GetImageMetadata(relativePath)
-		if query != "" && !service.MetadataMatchesQuery(metadata, name, query) {
+		// Any file present in that date's metadata was already visited in the loop above.
+		var emptyMeta service.ImageMetadata
+		if query != "" && !service.MetadataMatchesQuery(emptyMeta, name, query) {
 			continue
 		}
 		total++
@@ -144,14 +145,13 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 			continue
 		}
 		files = append(files, imageListFile{
-			Name:         name,
-			OriginalName: metadata.OriginalName,
-			Path:         relativePath,
-			URL:          imageURLForMetadata(cfg, relativePath, metadata),
-			ThumbURL:     thumbURLForMetadata(relativePath, metadata),
-			WebPURL:      service.GetWebPURL(relativePath, cfg),
-			InfoURL:      "/app/info?img=" + relativePath,
-			DownURL:      "/app/down?dw=" + relativePath,
+			Name:     name,
+			Path:     relativePath,
+			URL:      cfg.Domain + relativePath,
+			ThumbURL: "/app/thumb?img=" + relativePath,
+			WebPURL:  service.GetWebPURL(relativePath, cfg),
+			InfoURL:  "/app/info?img=" + relativePath,
+			DownURL:  "/app/down?dw=" + relativePath,
 		})
 	}
 	yesterday := time.Now().AddDate(0, 0, -1).Format("2006/01/02/")

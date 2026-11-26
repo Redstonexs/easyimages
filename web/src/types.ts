@@ -93,9 +93,12 @@ export interface AdminBootstrap {
   view: AdminView
   version: string
   title: string
+  is_admin: boolean
+  max_upload_size: number
+  workspace_api_base: string
 }
 
-export type AdminView = 'manager' | 'chart' | 'history' | 'urllist' | 'filer'
+export type AdminView = 'manager' | 'chart' | 'history' | 'urllist' | 'filer' | 'workspace'
 
 export interface AdminConfig {
   title: string

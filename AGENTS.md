@@ -2,7 +2,7 @@
 
 ## What This Is
 
-- EasyImage is a Go 1.21/Gin rewrite of a PHP image host: one binary, Go HTML templates, Vue/Vite islands, file-based config/storage, no database.
+- EasyImage is a Go/Gin rewrite of a PHP image host: one binary, Go HTML templates, Vue/Vite islands, file-based config/storage, no database. The Go minimum is defined in `go.mod`.
 - Runtime images live under `i/`; runtime logs, image metadata, and S3 multipart state live under `admin/logs/`; custom site icons live under `config/site-icon/`; frontend build output is `public/dist/`.
 - PHP files in `config/*.php` are versioned migration templates/input, not runtime config.
 
@@ -16,7 +16,7 @@
 - Static check: `go vet ./...`.
 - Build server: `go build -o easyimage .` or `go build -o easyimage.exe .` on Windows.
 - Run locally after building assets: `./easyimage` or `./easyimage.exe`; default port is `:8080` unless `config/config.json` sets `port`.
-- Docker Compose: `docker-compose up -d`; it builds assets in Node 22, builds the Go binary, and mounts `./config`, `./i`, and `./admin/logs`.
+- Docker Compose: `docker-compose up -d`; it uses the Node and Go versions pinned in the Dockerfile and mounts `./config`, `./i`, and `./admin/logs`.
 - Manual PHP config converter: `go run ./cmd/php2json config/config.php config/config.json`.
 - Migration status utility: `go run ./cmd/migrate_test`.
 

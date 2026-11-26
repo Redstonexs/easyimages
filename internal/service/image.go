@@ -11,6 +11,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"io/fs"
 	"log"
 	"mime/multipart"
 	"os"
@@ -23,9 +24,9 @@ import (
 	"time"
 
 	"easyimage/config"
+	"easyimage/internal/imageutil"
 	"easyimage/internal/storage"
 
-	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 )
 
@@ -55,13 +56,14 @@ var (
 )
 
 func init() {
+	q := imageProcessQueue
 	workers := runtime.NumCPU()
 	for i := 0; i < workers; i++ {
-		go func() {
-			for job := range imageProcessQueue {
+		go func(jobs <-chan imageProcessJob) {
+			for job := range jobs {
 				ProcessImageAfterUpload(job.filePath, job.cfg)
 			}
-		}()
+		}(q)
 	}
 }
 
@@ -95,32 +97,20 @@ func ProcessLocalUpload(c *gin.Context, fileHeader *multipart.FileHeader, cfg *c
 		}
 	}
 
-	// 完整的存储目录
-	uploadDir, dirErr := SanitizePath(filepath.Join(".", cfg.Path, target.StoragePath))
-	if dirErr != nil {
-		return map[string]interface{}{
-			"result":  "failed",
-			"code":    400,
-			"message": "存储路径无效",
-		}
-	}
-
-	// 创建目录
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		return map[string]interface{}{
-			"result":  "failed",
-			"code":    500,
-			"message": "创建目录失败: " + err.Error(),
-		}
-	}
-
-	// 完整的文件路径
-	filePath, pathErr := SanitizePath(filepath.Join(uploadDir, target.FileName))
+	// 一次路径消毒得到最终绝对路径，避免对 uploadDir 和 filePath 重复调用 Abs/Rel
+	filePath, pathErr := SanitizePathForConfig(filepath.Join(".", cfg.Path, target.StoragePath, target.FileName), cfg)
 	if pathErr != nil {
 		return map[string]interface{}{
 			"result":  "failed",
 			"code":    400,
 			"message": "无效的文件路径",
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return map[string]interface{}{
+			"result":  "failed",
+			"code":    500,
+			"message": "创建目录失败: " + err.Error(),
 		}
 	}
 
@@ -293,7 +283,7 @@ func AddWatermark(imgPath string, cfg *config.Config) error {
 	imgPath = safePath
 
 	// 打开图片
-	img, err := imaging.Open(imgPath)
+	img, err := imageutil.Open(imgPath)
 	if err != nil {
 		return err
 	}
@@ -309,16 +299,16 @@ func AddWatermark(imgPath string, cfg *config.Config) error {
 		x, y := calculatePosition(bounds, wBounds, cfg.WaterPosition)
 
 		// 合并图片
-		rgba := imaging.Clone(img)
+		rgba := imageutil.Clone(img)
 		draw.Draw(rgba, wBounds.Add(image.Pt(x, y)), watermarkImg, image.Point{}, draw.Over)
 
 		// 保存
-		return imaging.Save(rgba, imgPath)
+		return imageutil.Save(rgba, imgPath, imageutil.EncodeOptions{})
 
 	case 2: // 图片水印
 		// 打开水印图片
 		watermarkPath := filepath.Join(".", cfg.WaterImg)
-		watermark, err := imaging.Open(watermarkPath)
+		watermark, err := imageutil.Open(watermarkPath)
 		if err != nil {
 			return err
 		}
@@ -329,11 +319,11 @@ func AddWatermark(imgPath string, cfg *config.Config) error {
 		x, y := calculatePosition(bounds, wBounds, cfg.WaterPosition)
 
 		// 合并图片
-		rgba := imaging.Clone(img)
+		rgba := imageutil.Clone(img)
 		draw.Draw(rgba, wBounds.Add(image.Pt(x, y)), watermark, image.Point{}, draw.Over)
 
 		// 保存
-		return imaging.Save(rgba, imgPath)
+		return imageutil.Save(rgba, imgPath, imageutil.EncodeOptions{})
 	}
 
 	return nil
@@ -468,16 +458,16 @@ func ResizeImage(imgPath string, width, height int) error {
 	}
 	imgPath = safePath
 
-	img, err := imaging.Open(imgPath)
+	img, err := imageutil.Open(imgPath)
 	if err != nil {
 		return err
 	}
 
 	// 调整大小
-	resized := imaging.Resize(img, width, height, imaging.Lanczos)
+	resized := imageutil.Resize(img, width, height)
 
 	// 保存
-	return imaging.Save(resized, imgPath)
+	return imageutil.Save(resized, imgPath, imageutil.EncodeOptions{})
 }
 
 // CropImage 裁剪图片
@@ -488,15 +478,15 @@ func CropImage(imgPath string, width, height int) error {
 	}
 	imgPath = safePath
 
-	img, err := imaging.Open(imgPath)
+	img, err := imageutil.Open(imgPath)
 	if err != nil {
 		return err
 	}
 
 	// 居中裁剪
-	cropped := imaging.CropCenter(img, width, height)
+	cropped := imageutil.CropCenter(img, width, height)
 
-	return imaging.Save(cropped, imgPath)
+	return imageutil.Save(cropped, imgPath, imageutil.EncodeOptions{})
 }
 
 // ConvertImage 转换图片格式
@@ -512,7 +502,7 @@ func ConvertImage(imgPath, format string) (string, error) {
 	newPath := strings.TrimSuffix(imgPath, filepath.Ext(imgPath)) + "." + format
 
 	if format == "webp" {
-		// WebP 需要使用 cwebp CLI 编码（imaging 库不支持 WebP 编码）
+		// WebP 使用 cwebp CLI 编码。
 		cwebpPath, err := getCwebpPath()
 		if err != nil {
 			return "", fmt.Errorf("cwebp not found, cannot convert to webp: %w", err)
@@ -525,7 +515,7 @@ func ConvertImage(imgPath, format string) (string, error) {
 		return newPath, nil
 	}
 
-	img, err := imaging.Open(imgPath)
+	img, err := imageutil.Open(imgPath)
 	if err != nil {
 		return "", err
 	}
@@ -533,9 +523,9 @@ func ConvertImage(imgPath, format string) (string, error) {
 	// 保存为新格式
 	switch format {
 	case "jpg", "jpeg":
-		err = imaging.Save(img, newPath, imaging.JPEGQuality(90))
+		err = imageutil.Save(img, newPath, imageutil.EncodeOptions{JPEGQuality: 90})
 	case "png":
-		err = imaging.Save(img, newPath, imaging.PNGCompressionLevel(png.BestCompression))
+		err = imageutil.Save(img, newPath, imageutil.EncodeOptions{PNGCompression: png.BestCompression})
 	default:
 		return "", fmt.Errorf("unsupported format: %s", format)
 	}
@@ -790,27 +780,15 @@ func GetWebPURL(originalPath string, cfg *config.Config) string {
 		return cfg.Domain + cleanPath
 	}
 
-	storageDir, err := filepath.Abs("." + cfg.Path)
-	if err != nil {
-		return ""
-	}
 	webpRelPath, err := safeWebPRelPath(strings.TrimPrefix(cleanPath, prefix))
 	if err != nil {
 		return ""
 	}
-	webpFsPath := filepath.Join(storageDir, webpRelPath)
-	relToStorage, err := filepath.Rel(storageDir, webpFsPath)
-	if err != nil {
-		return ""
-	}
-	if relToStorage == ".." || strings.HasPrefix(relToStorage, ".."+string(filepath.Separator)) || filepath.IsAbs(relToStorage) {
-		return ""
-	}
-	webpFsPath = filepath.Join(storageDir, relToStorage)
+	webpFsPath := filepath.Join(storageRootForURLPath(cfg.Path), webpRelPath)
 
 	// 检查webp文件是否存在
 	if _, err := os.Stat(webpFsPath); err == nil {
-		webpURLPath := prefix + strings.ReplaceAll(relToStorage, string(filepath.Separator), "/")
+		webpURLPath := prefix + filepath.ToSlash(webpRelPath)
 		return cfg.Domain + webpURLPath
 	}
 
@@ -896,14 +874,12 @@ func BatchConvertToWebP(cfg *config.Config) BatchWebPResult {
 		".bmp": true, ".tiff": true, ".tif": true, ".tga": true,
 	}
 
-	filepath.Walk(storageDir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.WalkDir(storageDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		// 跳过目录
-		if info.IsDir() {
-			// 跳过系统内部目录和 webp 目录本身
-			name := info.Name()
+		if d.IsDir() {
+			name := d.Name()
 			if path != storageDir && (internalDirs[name] || name == "webp") {
 				return filepath.SkipDir
 			}
@@ -985,35 +961,33 @@ func CheckSVGSecurity(path string) bool {
 	return IsSafeSVGContent(content)
 }
 
+var dangerousSVGPatterns = [][]byte{
+	[]byte("<script"),
+	[]byte("javascript:"),
+	[]byte("vbscript:"),
+	[]byte("data:"),
+	[]byte("<iframe"),
+	[]byte("<embed"),
+	[]byte("<object"),
+	[]byte("<foreignobject"),
+	[]byte("onload"),
+	[]byte("onerror"),
+	[]byte("onclick"),
+	[]byte("onmouseover"),
+	[]byte("onfocus"),
+	[]byte("onblur"),
+	[]byte("onanimationend"),
+	[]byte("onbegin"),
+	[]byte("<use"),
+	[]byte("xlink:href"),
+	[]byte("<set"),
+	[]byte("<animate"),
+}
+
 // IsSafeSVGContent reports whether SVG bytes avoid active-content vectors.
 func IsSafeSVGContent(content []byte) bool {
 	lower := bytes.ToLower(content)
-
-	// 检查已知的 XSS 向量
-	dangerousPatterns := [][]byte{
-		[]byte("<script"),
-		[]byte("javascript:"),
-		[]byte("vbscript:"),
-		[]byte("data:"),
-		[]byte("<iframe"),
-		[]byte("<embed"),
-		[]byte("<object"),
-		[]byte("<foreignobject"),
-		[]byte("onload"),
-		[]byte("onerror"),
-		[]byte("onclick"),
-		[]byte("onmouseover"),
-		[]byte("onfocus"),
-		[]byte("onblur"),
-		[]byte("onanimationend"),
-		[]byte("onbegin"),
-		[]byte("<use"),
-		[]byte("xlink:href"),
-		[]byte("<set"),
-		[]byte("<animate"),
-	}
-
-	return !slices.ContainsFunc(dangerousPatterns, func(pattern []byte) bool {
+	return !slices.ContainsFunc(dangerousSVGPatterns, func(pattern []byte) bool {
 		return bytes.Contains(lower, pattern)
 	})
 }

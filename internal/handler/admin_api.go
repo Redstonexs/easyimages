@@ -630,10 +630,10 @@ func adminChartPayloadFromConfig(cfg *config.Config) adminChartPayload {
 	fsPath := "." + cfg.Path
 	stats := service.CollectDirStats(fsPath)
 	dailyStats := make([]gin.H, 0, 30)
+	now := time.Now()
 	for i := 0; i < 30; i++ {
-		date := time.Now().AddDate(0, 0, -i)
-		datePath := date.Format("2006/01/02/")
-		count := service.GetFileCount(fsPath + datePath + "*.*")
+		date := now.AddDate(0, 0, -i)
+		count := stats.DailyCounts[date.Format("2006/01/02")]
 		dailyStats = append(dailyStats, gin.H{"date": date.Format("01-02"), "count": count})
 	}
 	slices.Reverse(dailyStats)
@@ -665,7 +665,7 @@ func adminURLListPayload(c *gin.Context, cfg *config.Config) (adminURLListData, 
 	}
 
 	rawFiles := service.GetFileListRecursive("." + reqPath)
-	allFiles := make([]adminFileEntry, 0, len(rawFiles))
+	localNames := make([]string, 0, len(rawFiles))
 	seen := make(map[string]bool, len(rawFiles))
 	for _, name := range rawFiles {
 		if strings.HasPrefix(name, "webp/") || !service.IsImageFile(name) {
@@ -679,13 +679,15 @@ func adminURLListPayload(c *gin.Context, cfg *config.Config) (adminURLListData, 
 			}
 		}
 		seen[relativePath] = true
-		allFiles = append(allFiles, adminFileEntries(reqPath, []string{name}, cfg)...)
-	}
-	if reqPath == cfg.Path {
-		allFiles = append(allFiles, adminURLListMetadataEntries(cfg, query, seen)...)
+		localNames = append(localNames, name)
 	}
 
-	total := len(allFiles)
+	var s3Entries []adminFileEntry
+	if reqPath == cfg.Path {
+		s3Entries = adminURLListMetadataEntries(cfg, query, seen)
+	}
+
+	total := len(localNames) + len(s3Entries)
 	totalPages := (total + pageSize - 1) / pageSize
 	start := (page - 1) * pageSize
 	end := start + pageSize
@@ -696,6 +698,19 @@ func adminURLListPayload(c *gin.Context, cfg *config.Config) (adminURLListData, 
 		end = total
 	}
 
+	// 只对当前页需要返回的条目执行 os.Stat、WebP 检查和元数据拼装，避免分页前全量 IO。
+	pageFiles := make([]adminFileEntry, 0, end-start)
+	localCount := len(localNames)
+	if start < localCount {
+		localEnd := min(end, localCount)
+		pageFiles = append(pageFiles, adminFileEntries(reqPath, localNames[start:localEnd], cfg)...)
+	}
+	if end > localCount {
+		s3Start := max(0, start-localCount)
+		s3End := end - localCount
+		pageFiles = append(pageFiles, s3Entries[s3Start:s3End]...)
+	}
+
 	return adminURLListData{
 		Path:       reqPath,
 		Query:      query,
@@ -703,7 +718,7 @@ func adminURLListPayload(c *gin.Context, cfg *config.Config) (adminURLListData, 
 		PageSize:   pageSize,
 		Total:      total,
 		TotalPages: totalPages,
-		Files:      allFiles[start:end],
+		Files:      pageFiles,
 	}, nil
 }
 
@@ -827,9 +842,12 @@ func adminShellData(c *gin.Context, cfg *config.Config, view string) gin.H {
 	return gin.H{
 		"config": cfg,
 		"admin": gin.H{
-			"view":    view,
-			"version": config.Version,
-			"title":   cfg.Title,
+			"view":               view,
+			"version":            config.Version,
+			"title":              cfg.Title,
+			"is_admin":           service.IsAdmin(c),
+			"max_upload_size":    cfg.MaxSize,
+			"workspace_api_base": workspaceAPIBase(cfg.Path),
 		},
 	}
 }

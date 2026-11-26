@@ -7,8 +7,7 @@
     <meta name="keywords" content="{{.config.Keywords}}">
     <meta name="description" content="{{.config.Description}}">
     <link rel="icon" href="{{.config.SiteIcon}}">
-    <link rel="stylesheet" href="/public/static/zui/css/zui.min.css">
-    <link rel="stylesheet" href="/public/static/EasyImage.css">
+    <script>(function(){try{var t=localStorage.getItem('easyimage-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})();</script>
     {{if and .captcha (ne .captcha.Type "disabled")}}
     {{if eq .captcha.Type "turnstile"}}
     <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin>

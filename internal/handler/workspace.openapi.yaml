@@ -1,0 +1,520 @@
+openapi: 3.1.1
+info:
+  title: EasyImage Workspace API
+  version: "1.0.0"
+  description: |
+    Manage users, folders, original images, and saved variants. Start with getCurrentUser
+    to confirm the account associated with a Bearer token. Uploads require a multipart
+    file. Image delivery URLs are public and contain opaque IDs.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+  - sessionCookie: []
+paths:
+  /api/v1/me:
+    get:
+      operationId: getCurrentUser
+      summary: Get the current account and its storage usage
+      responses:
+        '200':
+          description: Current account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      summary: List tenant accounts and storage usage
+      description: Requires an administrator. The built-in administrator is returned by getCurrentUser.
+      responses:
+        '200':
+          description: Tenant accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/User' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createUser
+      summary: Create a tenant account
+      description: Requires an administrator.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9_.-]{2,31}$'
+                  example: studio
+                password: { $ref: '#/components/schemas/Password' }
+                quota_bytes: { $ref: '#/components/schemas/Quota' }
+      responses:
+        '201':
+          description: Created account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/v1/users/{user_id}:
+    patch:
+      operationId: updateUser
+      summary: Change a tenant's quota, password, or login status
+      description: Requires an administrator. Resetting the password or changing login status revokes sessions and the token. Public image URLs remain available.
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/AssetID' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                quota_bytes: { $ref: '#/components/schemas/Quota' }
+                password: { $ref: '#/components/schemas/Password' }
+                disabled: { type: boolean }
+      responses:
+        '200':
+          description: Updated account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/v1/tokens:
+    post:
+      operationId: rotateAccessToken
+      summary: Issue a Bearer token for the current account
+      description: Requires a browser session. Replaces any previous token. Save the returned secret now. Later responses only indicate whether a token exists.
+      security:
+        - sessionCookie: []
+      responses:
+        '201':
+          description: New access token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, token_type]
+                properties:
+                  token: { type: string }
+                  token_type: { type: string, const: Bearer }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: revokeAccessToken
+      summary: Revoke the current account's Bearer token
+      security:
+        - sessionCookie: []
+      responses:
+        '204': { description: Token revoked }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/v1/folders:
+    parameters:
+      - $ref: '#/components/parameters/OwnerID'
+    get:
+      operationId: listFolders
+      summary: List folders in a workspace
+      description: The root folder is implied and is represented by an empty string.
+      responses:
+        '200':
+          description: Folders sorted by path
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Folder' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createFolder
+      summary: Create a folder and any missing parent folders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [path]
+              properties:
+                path: { type: string, minLength: 1, description: Relative folder path, example: projects/summer }
+      responses:
+        '201':
+          description: Created folder
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Folder' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/v1/images:
+    parameters:
+      - $ref: '#/components/parameters/OwnerID'
+    get:
+      operationId: listImages
+      summary: List images in a workspace
+      description: Lists originals by default, sorted from newest to oldest. Pass next_cursor as cursor to fetch more images.
+      parameters:
+        - name: folder
+          in: query
+          allowEmptyValue: true
+          schema: { type: string }
+          description: Exact folder path. Omit for all folders. Use an empty value for the root folder.
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: include_variants
+          in: query
+          schema: { type: boolean, default: false }
+          description: Include saved variants in the listing. Variants use their destination folder for filtering.
+      responses:
+        '200':
+          description: Page of images
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Asset' }
+                  next_cursor:
+                    type: string
+                    description: Empty when there are no more results.
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: uploadOriginalImage
+      summary: Upload an original image into a folder
+      description: Preserves the bytes of the original. Send one supported image file within the server's upload limit and the account's quota.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                folder: { type: string, default: '', example: projects/summer, description: Existing relative folder path. Omit for the root folder. }
+            encoding:
+              file:
+                contentType: application/octet-stream, image/*
+      responses:
+        '201':
+          description: Original with its public delivery URL
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Asset' }
+        '409':
+          description: Account storage quota exceeded
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/v1/images/{image_id}:
+    parameters:
+      - $ref: '#/components/parameters/ImageID'
+    get:
+      operationId: getImage
+      summary: Get an original and its saved variants
+      responses:
+        '200':
+          description: Image details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [image, variants]
+                properties:
+                  image: { $ref: '#/components/schemas/Asset' }
+                  variants:
+                    type: array
+                    items: { $ref: '#/components/schemas/Asset' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deleteImage
+      summary: Delete an original and all its saved variants
+      responses:
+        '204': { description: Image and variants deleted }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/v1/images/{image_id}/variants:
+    post:
+      operationId: createImageVariant
+      summary: Render and store a variant of an original
+      description: The variant has its own public URL. Stored variants count toward the original owner's quota.
+      parameters:
+        - $ref: '#/components/parameters/ImageID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transform]
+              additionalProperties: false
+              properties:
+                transform: { $ref: '#/components/schemas/Transform' }
+                folder:
+                  type: string
+                  description: Existing relative destination folder. Omit to use the original's folder. An empty string selects the root.
+            example:
+              folder: projects/summer
+              transform: { width: 640, format: webp, quality: 85 }
+      responses:
+        '201':
+          description: Saved variant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Asset' }
+        '409':
+          description: Account storage quota exceeded
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/v1/images/{image_id}/variants/{variant_id}:
+    delete:
+      operationId: deleteImageVariant
+      summary: Delete one saved variant
+      parameters:
+        - $ref: '#/components/parameters/ImageID'
+        - name: variant_id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/AssetID' }
+      responses:
+        '204': { description: Variant deleted }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/v1/settings:
+    get:
+      operationId: getDeliverySettings
+      summary: Inspect the public image URL settings
+      description: Requires an administrator.
+      responses:
+        '200':
+          description: Delivery settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliverySettings' }
+        default: { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: updateDeliverySettings
+      summary: Set the public origin and URL prefix
+      description: Requires an administrator. Previous prefixes continue serving the same image IDs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeliverySettings' }
+            example: { public_origin: 'https://images.example.com', public_prefix: /media }
+      responses:
+        '200':
+          description: Updated delivery settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliverySettings' }
+        default: { $ref: '#/components/responses/Problem' }
+  /{asset_id}:
+    get:
+      operationId: deliverImage
+      summary: Fetch a public original or a transformed image
+      description: Use the exact public URL from the image or variant response. Add a transformation parameter to resize or re-encode for this request. The request does not save a variant.
+      servers:
+        - url: /{public_prefix}
+          variables:
+            public_prefix:
+              default: media
+              description: Administrator-configured prefix without its leading slash.
+      security: []
+      parameters:
+        - name: asset_id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/AssetID' }
+        - { name: width, in: query, schema: { $ref: '#/components/schemas/Dimension' } }
+        - { name: height, in: query, schema: { $ref: '#/components/schemas/Dimension' } }
+        - { name: scale, in: query, schema: { $ref: '#/components/schemas/Scale' } }
+        - { name: fit, in: query, schema: { $ref: '#/components/schemas/Fit' } }
+        - { name: format, in: query, schema: { $ref: '#/components/schemas/Format' } }
+        - { name: quality, in: query, schema: { $ref: '#/components/schemas/Quality' } }
+      responses:
+        '200':
+          description: Image bytes
+          content:
+            image/*: {}
+        '206':
+          description: Requested byte range
+          content:
+            image/*: {}
+        '304': { description: Cached representation is current }
+        default: { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: An account-specific token created in the workspace.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+  parameters:
+    OwnerID:
+      name: owner_id
+      in: query
+      schema: { type: string }
+      description: Target workspace ID. Defaults to the authenticated account. Only administrators can select another account.
+    ImageID:
+      name: image_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/AssetID' }
+  responses:
+    Problem:
+      description: Request error following RFC 9457. Use the code field for programmatic handling.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: about:blank
+            title: Conflict
+            status: 409
+            detail: the original or variant would exceed the account's storage quota
+            code: quota_exceeded
+            quota_bytes: 1048576
+            used_bytes: 1024000
+            requested_bytes: 32768
+  schemas:
+    AssetID:
+      type: string
+      pattern: '^[0-9a-f]{32}$'
+      example: 22cd28dfb12c4502b7513d0e6bb038a1
+    Password:
+      type: string
+      minLength: 8
+      format: password
+      writeOnly: true
+      description: At least 8 characters and at most 72 UTF-8 bytes.
+    Quota:
+      type: integer
+      format: int64
+      minimum: 0
+      maximum: 1125899906842624
+      default: 0
+      description: Storage quota in bytes. Zero means unlimited.
+    User:
+      type: object
+      required: [id, username, role, quota_bytes, used_bytes, disabled, has_token]
+      properties:
+        id: { type: string, description: Tenant ID or the fixed ID admin }
+        username: { type: string }
+        role: { type: string, enum: [admin, user] }
+        quota_bytes: { $ref: '#/components/schemas/Quota' }
+        used_bytes: { type: integer, format: int64, minimum: 0 }
+        disabled: { type: boolean }
+        has_token: { type: boolean }
+        created_at: { type: string, format: date-time }
+    Folder:
+      type: object
+      required: [owner_id, path, created_at]
+      properties:
+        owner_id: { type: string }
+        path: { type: string, example: projects/summer }
+        created_at: { type: string, format: date-time }
+    Asset:
+      type: object
+      required: [id, owner_id, folder, filename, content_type, size_bytes, created_at, url]
+      properties:
+        id: { $ref: '#/components/schemas/AssetID' }
+        owner_id: { type: string }
+        folder: { type: string, description: Internal folder path }
+        filename: { type: string }
+        content_type: { type: string, example: image/webp }
+        size_bytes: { type: integer, format: int64, minimum: 1 }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        url: { type: string, format: uri, description: Public delivery URL }
+        image_id:
+          $ref: '#/components/schemas/AssetID'
+          description: Present on variants. Identifies their original.
+        transform: { $ref: '#/components/schemas/Transform' }
+    Dimension: { type: integer, minimum: 1, maximum: 4096 }
+    Scale:
+      type: number
+      minimum: 0.01
+      maximum: 4
+      description: Scale both axes by this factor. Cannot be combined with width, height, or fit.
+    Fit:
+      type: string
+      enum: [scale-down, contain, cover]
+      default: scale-down
+      description: Scale-down preserves aspect ratio without upscaling. Contain allows upscaling. Cover requires both dimensions and crops to fill.
+    Format:
+      type: string
+      enum: [jpeg, jpg, png, webp]
+      description: Target encoding. When omitted, JPEG and WebP stay in their original format and other supported inputs are encoded as PNG.
+    Quality:
+      type: integer
+      minimum: 1
+      maximum: 100
+      default: 85
+      description: JPEG and WebP quality. PNG ignores quality.
+    Transform:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        width: { $ref: '#/components/schemas/Dimension' }
+        height: { $ref: '#/components/schemas/Dimension' }
+        scale: { $ref: '#/components/schemas/Scale' }
+        fit: { $ref: '#/components/schemas/Fit' }
+        format: { $ref: '#/components/schemas/Format' }
+        quality: { $ref: '#/components/schemas/Quality' }
+    DeliverySettings:
+      type: object
+      required: [public_prefix]
+      properties:
+        public_origin:
+          type: string
+          description: HTTP(S) origin. Empty uses the site domain.
+        public_prefix:
+          type: string
+          pattern: '^(/[a-z0-9][a-z0-9_-]*)+$'
+          maxLength: 80
+          example: /media
+        effective_origin: { type: string, format: uri, readOnly: true }
+    Problem:
+      type: object
+      required: [type, title, status, detail, code]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string, example: quota_exceeded }
+        quota_bytes: { type: integer, format: int64 }
+        used_bytes: { type: integer, format: int64 }
+        requested_bytes: { type: integer, format: int64 }

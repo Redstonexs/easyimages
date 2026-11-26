@@ -3,25 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>错误 - {{.config.Title}}</title>
+    <title>提示 - {{.config.Title}}</title>
     <link rel="icon" href="{{.config.SiteIcon}}">
-    <link rel="stylesheet" href="/public/static/zui/css/zui.min.css">
+    <script>(function(){try{var t=localStorage.getItem('easyimage-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})();</script>
+    <style>
+        :root { --bg:#ffffff; --fg:#0a0a0a; --muted-fg:#6b6b6b; --border:#e5e5e5; }
+        .dark { --bg:#0f0f0f; --fg:#fafafa; --muted-fg:#a3a3a3; --border:rgba(255,255,255,0.12); }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 24px 16px;
+            background: var(--bg);
+            color: var(--fg);
+            font-family: "Inter", "Noto Sans SC", "PingFang SC", system-ui, -apple-system, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        .card {
+            width: 100%;
+            max-width: 440px;
+            padding: 32px 28px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            text-align: center;
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted-fg);
+            margin-bottom: 14px;
+        }
+        h1 { margin: 0; font-size: 20px; font-weight: 600; }
+        p { margin: 10px 0 24px; font-size: 13px; color: var(--muted-fg); }
+        .actions { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            height: 36px;
+            padding: 0 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg);
+            color: var(--fg);
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+        }
+        .btn-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+        .btn:hover { opacity: 0.88; }
+    </style>
 </head>
 <body>
-    <div class="container" style="max-width: 600px; margin-top: 100px;">
-        <div class="text-center">
-            <h1><i class="icon icon-exclamation-sign text-danger"></i></h1>
-            <h2>{{.message}}</h2>
-            <p class="text-muted">请检查链接是否正确，或联系管理员</p>
-            <hr>
-            <a href="/" class="btn btn-primary">
-                <i class="icon icon-home"></i> 返回首页
-            </a>
-            <a href="/app/list" class="btn btn-default">
-                <i class="icon icon-list"></i> 图床广场
-            </a>
+    <main class="card">
+        <span class="badge">Notice</span>
+        <h1>{{.message}}</h1>
+        <p>请检查访问链接是否正确，或返回首页继续操作。</p>
+        <div class="actions">
+            <a href="/" class="btn btn-primary">返回首页</a>
+            <a href="/app/list" class="btn">图床广场</a>
         </div>
-    </div>
+    </main>
 </body>
 </html>
-
