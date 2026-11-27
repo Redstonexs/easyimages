@@ -17,6 +17,7 @@ import type { NoticeType } from '@/shared/notify'
 import { adminApi } from '@/shared/adminApi'
 import { runBatchDelete, summarizeBatchDelete } from '@/shared/batchDelete'
 import { formatSize } from '@/shared/format'
+import { fetchCached, getCached, invalidateCached, setCached } from '@/shared/swrCache'
 import { useCopy } from '@/shared/useCopy'
 import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import { useConfirmDialog } from '@/components/ConfirmDialog'
@@ -49,21 +50,28 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
   const copy = useMemo(() => useCopy(onNotice), [onNotice])
   const { confirm, dialog: confirmDialog } = useConfirmDialog()
 
-  const [loading, setLoading] = useState(true)
-  const [data, setData] = useState<AdminFilerData | null>(null)
+  const initialData = getCached<AdminFilerData>('admin:filer:')
+  const [loading, setLoading] = useState(!initialData)
+  const [data, setData] = useState<AdminFilerData | null>(initialData ?? null)
   const [queryInput, setQueryInput] = useState('')
   const [selectedImage, setSelectedImage] = useState<AdminFileEntry | null>(null)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const showInitialSkeleton = useDelayedLoading(loading && !data)
 
   const load = useCallback(async (path?: string) => {
-    setLoading(true)
     const params = new URLSearchParams()
     if (path) params.set('path', path)
+    const cacheKey = `admin:filer:${params.toString()}`
+    const cached = getCached<AdminFilerData>(cacheKey)
+    if (cached) setData(cached)
+    setLoading(true)
     try {
-      const payload = await adminApi.filer(params)
+      const payload = params.toString() === ''
+        ? await fetchCached(cacheKey, () => adminApi.filer(params), 5_000)
+        : await adminApi.filer(params)
       payload.dirs = payload.dirs ?? []
       payload.files = payload.files ?? []
+      setCached(cacheKey, payload)
       setData(payload)
       setQueryInput('')
       setSelected(new Set())
@@ -167,6 +175,9 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
     try {
       const result = await adminApi.deleteFile(file.path)
       if (result.code === 200) {
+        invalidateCached('admin:filer:')
+        invalidateCached('admin:chart')
+        invalidateCached('admin:overview')
         setData(prev => (prev ? { ...prev, files: prev.files.filter(item => item.url !== file.url) } : prev))
         if (selectedImage?.url === file.url) setSelectedImage(null)
         setSelected(prev => {
@@ -198,6 +209,11 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
       async url => adminApi.deleteFile(byUrl.get(url)!.path)
     )
     const deleted = new Set(outcome.succeeded)
+    if (deleted.size > 0) {
+      invalidateCached('admin:filer:')
+      invalidateCached('admin:chart')
+      invalidateCached('admin:overview')
+    }
     setData(prev => (prev ? { ...prev, files: prev.files.filter(item => !deleted.has(item.url)) } : prev))
     if (selectedImage && deleted.has(selectedImage.url)) setSelectedImage(null)
     setSelected(prev => new Set([...prev].filter(url => !deleted.has(url))))
@@ -207,13 +223,13 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
 
   if (loading && !data) {
     if (!showInitialSkeleton) return <div className="min-h-[420px]" aria-busy="true" />
-    return <Skeleton className="panel-enter h-[520px] rounded-xl" />
+    return <Skeleton className="h-[520px] rounded-xl" />
   }
 
   if (!data) return null
 
   return (
-    <div className="panel-enter space-y-4">
+    <div className="space-y-4">
       {confirmDialog}
 
       <Card className="relative overflow-hidden gap-0 py-0">
@@ -223,7 +239,8 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
             <Button
               type="button"
               size="xs"
-              variant={data.path === data.root_path ? 'default' : 'outline'}
+              variant={data.path === data.root_path ? 'secondary' : 'ghost'}
+              className={data.path === data.root_path ? 'ring-1 ring-border font-medium text-foreground' : 'text-muted-foreground'}
               onClick={() => void load(data.root_path)}
             >
               根目录
@@ -234,8 +251,8 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
                 <Button
                   type="button"
                   size="xs"
-                  variant={crumb.path === data.path ? 'default' : 'ghost'}
-                  className="font-mono"
+                  variant={crumb.path === data.path ? 'secondary' : 'ghost'}
+                  className={`font-mono ${crumb.path === data.path ? 'ring-1 ring-border font-medium text-foreground' : 'text-muted-foreground'}`}
                   onClick={() => void load(crumb.path)}
                 >
                   {crumb.label}

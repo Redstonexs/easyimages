@@ -10,7 +10,7 @@ import { useConfirmDialog } from '@/components/ConfirmDialog'
 import { FadeImage } from '@/components/FadeImage'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -22,6 +22,7 @@ const ROOT_SENTINEL = '__root__'
 interface WorkspaceImageDetailProps {
   id: string
   folders: WorkspaceFolder[]
+  embedded?: boolean
   onNotice: (message: string, type?: NoticeType) => void
   onClose?: () => void
   onRemoved: () => void
@@ -31,6 +32,7 @@ interface WorkspaceImageDetailProps {
 export default function WorkspaceImageDetail({
   id,
   folders,
+  embedded = false,
   onNotice,
   onClose,
   onRemoved,
@@ -153,24 +155,39 @@ export default function WorkspaceImageDetail({
 
   if (loading) {
     if (!showSkeleton) return <div className="min-h-64" aria-busy="true" />
-    return <Skeleton className="panel-enter h-80 rounded-xl" />
+    return <Skeleton className="h-80 rounded-xl" />
   }
 
-  return (
-    <Card id="workspace-image-detail" tabIndex={-1} aria-label="图片详情" className="panel-enter">
+  const content = (
+    <>
       {confirmDialog}
 
       {image && (
-        <>
-          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+        <div className="space-y-5">
+          <div className={`flex flex-wrap items-start justify-between gap-3 ${embedded ? 'pr-8' : 'px-5'}`}>
             <div className="min-w-0 space-y-1">
-              <CardTitle className="truncate text-base">{image.filename}</CardTitle>
-              <CardDescription className="font-mono text-xs">
+              <h2 className="truncate text-base leading-snug font-semibold tracking-tight">{image.filename}</h2>
+              <p className="font-mono text-xs text-muted-foreground">
                 {image.folder || '根目录'} · {formatSize(image.size_bytes)}
                 {image.width && image.height ? ` · ${image.width} × ${image.height}` : ''}
-              </CardDescription>
+              </p>
             </div>
             <div className="flex items-center gap-1.5">
+              <Button type="button" variant="outline" size="xs" onClick={() => void copy(image.url)}>
+                <Copy className="size-3.5" />
+                复制链接
+              </Button>
+              {image.webp_url && image.webp_url !== image.url && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => void copy(new URL(image.webp_url!, window.location.href).href, '已复制 WebP 链接')}
+                >
+                  <Copy className="size-3.5" />
+                  WebP
+                </Button>
+              )}
               <Button variant="outline" size="xs" asChild>
                 <a href={image.url} target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="size-3.5" />
@@ -183,15 +200,15 @@ export default function WorkspaceImageDetail({
                   删除原图
                 </Button>
               )}
-              {onClose && (
+              {onClose && !embedded && (
                 <Button type="button" variant="ghost" size="icon-xs" aria-label="关闭图片详情" onClick={onClose}>
                   <X className="size-3.5" />
                 </Button>
               )}
             </div>
-          </CardHeader>
+          </div>
 
-          <CardContent className="space-y-5">
+          <div className={`space-y-5 ${embedded ? '' : 'px-5'}`}>
             <div className={image.legacy ? '' : 'grid gap-5 md:grid-cols-2'}>
               <a
                 href={image.url}
@@ -388,18 +405,28 @@ export default function WorkspaceImageDetail({
                 </ul>
               )}
             </div>}
-          </CardContent>
-        </>
+          </div>
+        </div>
       )}
 
       {error && (
-        <CardContent className="pt-0">
+        <div className={embedded ? 'pt-3' : 'px-5 pt-2'}>
           <Alert variant="emphasis">
             <AlertCircle className="size-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
-        </CardContent>
+        </div>
       )}
+    </>
+  )
+
+  if (embedded) {
+    return <div id="workspace-image-detail" tabIndex={-1} aria-label="图片详情">{content}</div>
+  }
+
+  return (
+    <Card id="workspace-image-detail" tabIndex={-1} aria-label="图片详情">
+      {content}
     </Card>
   )
 }

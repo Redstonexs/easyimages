@@ -9,7 +9,10 @@ import {
   Settings
 } from 'lucide-react'
 import type { AdminBootstrap, AdminView } from '@/types'
+import { adminApi } from '@/shared/adminApi'
+import { prefetchCached } from '@/shared/swrCache'
 import { notifyToast } from '@/shared/useNotices'
+import { workspaceApi } from '@/shared/workspaceApi'
 import { useConfirmDialog } from '@/components/ConfirmDialog'
 import { SiteHeader } from '@/components/SiteHeader'
 import { Badge } from '@/components/ui/badge'
@@ -28,6 +31,31 @@ const NAV_ITEMS: Array<{ view: AdminView; label: string; description: string; hr
   { view: 'chart', label: '数据统计', description: '近 30 天上传趋势与存储格式分布', href: '/admin/chart', icon: BarChart3 },
   { view: 'filer', label: '文件管理', description: '按本地目录树浏览、复制与清理文件', href: '/admin/filer', icon: FolderKanban }
 ]
+
+function prefetchAdminView(view: AdminView, isAdmin: boolean) {
+  switch (view) {
+    case 'manager':
+      prefetchCached('admin:overview', () => adminApi.overview())
+      break
+    case 'chart':
+      prefetchCached('admin:chart', () => adminApi.chart())
+      break
+    case 'history':
+      prefetchCached('admin:history:', () => adminApi.history(new URLSearchParams()))
+      break
+    case 'filer':
+      prefetchCached('admin:filer:', () => adminApi.filer(new URLSearchParams()))
+      break
+    case 'workspace':
+      prefetchCached('ws:me', () => workspaceApi.me())
+      if (isAdmin) {
+        prefetchCached('ws:users', () => workspaceApi.users())
+        prefetchCached('ws:folders:admin', () => workspaceApi.folders('admin'))
+        prefetchCached('ws:images:admin:__all__', () => workspaceApi.images('admin', null, ''))
+      }
+      break
+  }
+}
 
 export default function AdminApp({ bootstrap }: { bootstrap: AdminBootstrap }) {
   const [currentView, setCurrentView] = useState<AdminView>(bootstrap.view)
@@ -105,7 +133,7 @@ export default function AdminApp({ bootstrap }: { bootstrap: AdminBootstrap }) {
       <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row lg:gap-8 lg:py-8">
         {bootstrap.is_admin && (
           <aside className="shrink-0 lg:w-52" aria-label="后台导航">
-            <nav className="flex gap-1 overflow-x-auto pb-1 lg:sticky lg:top-20 lg:flex-col lg:gap-1 lg:overflow-visible lg:pb-0">
+            <nav className="no-scrollbar flex gap-1 overflow-x-auto pb-1 lg:sticky lg:top-20 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:pb-0">
               {NAV_ITEMS.map(item => {
                 const Icon = item.icon
                 const active = currentView === item.view
@@ -114,6 +142,8 @@ export default function AdminApp({ bootstrap }: { bootstrap: AdminBootstrap }) {
                     key={item.view}
                     ref={active ? activeNavRef : undefined}
                     href={item.href}
+                    onMouseEnter={() => prefetchAdminView(item.view, bootstrap.is_admin)}
+                    onFocus={() => prefetchAdminView(item.view, bootstrap.is_admin)}
                     onClick={event => {
                       event.preventDefault()
                       void navigate(item.view, item.href)
@@ -121,18 +151,24 @@ export default function AdminApp({ bootstrap }: { bootstrap: AdminBootstrap }) {
                     aria-current={active ? 'page' : undefined}
                     className={
                       active
-                        ? 'inline-flex shrink-0 items-center justify-between gap-2.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-xs transition-[background-color,color,transform] duration-150'
-                        : 'inline-flex shrink-0 items-center justify-between gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-muted hover:text-foreground active:scale-[0.98]'
+                        ? 'relative inline-flex shrink-0 items-center justify-between gap-2.5 rounded-lg bg-secondary px-3 py-2 text-sm font-medium text-foreground ring-1 ring-border/80 transition-[background-color,color] duration-150'
+                        : 'relative inline-flex shrink-0 items-center justify-between gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-[background-color,color] duration-150 hover:bg-muted/70 hover:text-foreground'
                     }
                   >
+                    {active && (
+                      <span
+                        aria-hidden="true"
+                        className="hidden lg:block absolute left-0 top-1/2 h-4 w-[2.5px] -translate-y-1/2 rounded-r-full bg-foreground"
+                      />
+                    )}
                     <span className="inline-flex items-center gap-2.5">
-                      <Icon className="size-4 shrink-0" />
+                      <Icon className={`size-4 shrink-0 ${active ? 'text-foreground' : 'text-muted-foreground'}`} />
                       <span>{item.label}</span>
                     </span>
                     {item.view === 'manager' && configDirty && (
                       <span
                         title="有未保存的更改"
-                        className={`size-1.5 rounded-full ${active ? 'bg-primary-foreground' : 'bg-foreground'}`}
+                        className="size-1.5 rounded-full bg-foreground"
                       />
                     )}
                   </a>
@@ -144,14 +180,14 @@ export default function AdminApp({ bootstrap }: { bootstrap: AdminBootstrap }) {
 
         <main className="min-w-0 flex-1 space-y-6">
           <header className="flex flex-wrap items-end justify-between gap-2 border-b pb-4">
-            <div key={currentView} className="panel-enter">
+            <div>
               <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
               <p className="mt-1 text-xs text-muted-foreground">
                 {activeNav?.description || bootstrap.title}
               </p>
             </div>
             {configDirty && currentView === 'manager' && (
-              <Badge variant="outline" className="panel-enter gap-1.5 font-normal">
+              <Badge variant="outline" className="gap-1.5 font-normal">
                 <span className="size-1.5 rounded-full bg-foreground" />
                 有未保存的配置更改
               </Badge>

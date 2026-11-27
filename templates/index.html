@@ -8,8 +8,8 @@
     <meta name="description" content="{{.config.Description}}">
     <link rel="icon" href="{{.config.SiteIcon}}">
     <meta name="color-scheme" content="light dark">
-    <style>html{background:#ffffff;color:#0a0a0a;color-scheme:light}html.dark{background:#0a0a0a;color:#f7f7f5;color-scheme:dark}body{margin:0;min-height:100vh;background:inherit;color:inherit}</style>
     <script>(function(){try{var t=localStorage.getItem('easyimage-theme');var d=t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;if(d){r.classList.add('dark');r.style.colorScheme='dark'}else{r.style.colorScheme='light'}}catch(e){}})();</script>
+    <style>html{background:#ffffff;color:#0a0a0a;color-scheme:light;scrollbar-gutter:stable}html.dark{background:#0a0a0a;color:#f7f7f5;color-scheme:dark}body{margin:0;min-height:100vh;background:inherit;color:inherit}</style>
     {{if and .captcha (ne .captcha.Type "disabled")}}
     {{if eq .captcha.Type "turnstile"}}
     <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin>

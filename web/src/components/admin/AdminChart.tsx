@@ -3,6 +3,7 @@ import { Files, HardDrive, Tag, TrendingUp } from 'lucide-react'
 import type { AdminChart as AdminChartData } from '@/types'
 import type { NoticeType } from '@/shared/notify'
 import { adminApi } from '@/shared/adminApi'
+import { fetchCached, getCached } from '@/shared/swrCache'
 import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,17 +12,18 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 export default function AdminChart({ onNotice }: { onNotice: (message: string, type?: NoticeType) => void }) {
-  const [loading, setLoading] = useState(true)
-  const [chart, setChart] = useState<AdminChartData | null>(null)
+  const initialChart = getCached<AdminChartData>('admin:chart')
+  const [loading, setLoading] = useState(!initialChart)
+  const [chart, setChart] = useState<AdminChartData | null>(initialChart ?? null)
   const [hoveredDay, setHoveredDay] = useState<{ date: string; count: number } | null>(null)
   const showSkeleton = useDelayedLoading(loading)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
-      setLoading(true)
+      if (!getCached<AdminChartData>('admin:chart')) setLoading(true)
       try {
-        const data = await adminApi.chart()
+        const data = await fetchCached('admin:chart', () => adminApi.chart(), 5_000)
         if (!cancelled) setChart(data)
       } catch (error) {
         if (!cancelled) onNotice(error instanceof Error ? error.message : '加载统计失败', 'danger')
@@ -45,10 +47,10 @@ export default function AdminChart({ onNotice }: { onNotice: (message: string, t
     return Object.entries(chart.format_stats).sort((a, b) => b[1] - a[1])
   }, [chart])
 
-  if (loading) {
+  if (loading && !chart) {
     if (!showSkeleton) return <div className="min-h-[420px]" aria-busy="true" />
     return (
-      <div className="panel-enter space-y-4">
+      <div className="space-y-4">
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
         </div>
@@ -63,7 +65,7 @@ export default function AdminChart({ onNotice }: { onNotice: (message: string, t
   const todayCount = chart.daily_stats[chart.daily_stats.length - 1]?.count || 0
 
   return (
-    <div className="panel-enter space-y-6">
+    <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Card className="gap-1 py-4">
           <CardContent className="flex items-center justify-between">

@@ -4,6 +4,7 @@ import type { GalleryBootstrap, GalleryFile } from '@/types'
 import type { NoticeType } from '@/shared/notify'
 import { adminApi } from '@/shared/adminApi'
 import { runBatchDelete, summarizeBatchDelete } from '@/shared/batchDelete'
+import { fetchCached, getCached, invalidateCached, setCached } from '@/shared/swrCache'
 import { useCopy } from '@/shared/useCopy'
 import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import { useConfirmDialog } from '@/components/ConfirmDialog'
@@ -31,10 +32,11 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
   const copy = useMemo(() => useCopy(onNotice), [onNotice])
   const { confirm, dialog: confirmDialog } = useConfirmDialog()
 
-  const [loading, setLoading] = useState(true)
-  const [gallery, setGallery] = useState<GalleryBootstrap | null>(null)
+  const initialGallery = getCached<GalleryBootstrap>('admin:history:')
+  const [loading, setLoading] = useState(!initialGallery)
+  const [gallery, setGallery] = useState<GalleryBootstrap | null>(initialGallery ?? null)
   const [selectedImage, setSelectedImage] = useState<GalleryFile | null>(null)
-  const [queryInput, setQueryInput] = useState('')
+  const [queryInput, setQueryInput] = useState(initialGallery?.q || '')
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const showInitialSkeleton = useDelayedLoading(loading && !gallery)
 
@@ -58,10 +60,18 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
     if (ext) params.set('ext', ext)
     if (q) params.set('q', q)
 
+    const cacheKey = `admin:history:${params.toString()}`
+    const cached = getCached<GalleryBootstrap>(cacheKey)
+    if (cached) setGallery(cached)
+
     const typedQuery = queryRef.current
     setLoading(true)
     try {
-      const payload = await adminApi.history(params, { signal: controller.signal })
+      const payload = params.toString() === ''
+        ? await fetchCached(cacheKey, () => adminApi.history(new URLSearchParams()), 5_000)
+        : await adminApi.history(params, { signal: controller.signal })
+      if (controller.signal.aborted) return
+      setCached(cacheKey, payload)
       setGallery(payload)
       setSelected(new Set())
       if (queryRef.current === typedQuery) setQueryInput(payload.q || '')
@@ -136,6 +146,9 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
     try {
       const result = await adminApi.deleteHistory(file.path)
       if (result.code === 200) {
+        invalidateCached('admin:history:')
+        invalidateCached('admin:chart')
+        invalidateCached('admin:overview')
         setGallery(prev => (prev ? { ...prev, files: prev.files.filter(item => item.url !== file.url) } : prev))
         setSelected(prev => {
           const next = new Set(prev)
@@ -166,6 +179,11 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
       async url => adminApi.deleteHistory(byUrl.get(url)!.path)
     )
     const deleted = new Set(outcome.succeeded)
+    if (deleted.size > 0) {
+      invalidateCached('admin:history:')
+      invalidateCached('admin:chart')
+      invalidateCached('admin:overview')
+    }
     setGallery(prev => (prev ? { ...prev, files: prev.files.filter(item => !deleted.has(item.url)) } : prev))
     setSelected(prev => new Set([...prev].filter(url => !deleted.has(url))))
     const summary = summarizeBatchDelete(outcome)
@@ -175,7 +193,7 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
   if (loading && !gallery) {
     if (!showInitialSkeleton) return <div className="min-h-[360px]" aria-busy="true" />
     return (
-      <div className="panel-enter grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="aspect-[4/3] rounded-xl" />)}
       </div>
     )
@@ -184,17 +202,18 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
   if (!gallery) return null
 
   return (
-    <div className="panel-enter space-y-4">
+    <div className="space-y-4">
       {confirmDialog}
 
       <Card className="relative gap-3 overflow-hidden p-4">
         {loading && <div className="loading-bar absolute inset-x-0 top-0" aria-hidden="true" />}
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="no-scrollbar flex flex-nowrap items-center gap-1 overflow-x-auto pb-0.5 lg:pb-0">
             <Button
               type="button"
               size="xs"
-              variant={activeDate === gallery.today ? 'default' : 'outline'}
+              variant={activeDate === gallery.today ? 'secondary' : 'ghost'}
+              className={`shrink-0 ${activeDate === gallery.today ? 'ring-1 ring-border font-medium text-foreground' : 'text-muted-foreground'}`}
               onClick={() => void load({ date: gallery.today })}
             >
               今日
@@ -202,7 +221,8 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
             <Button
               type="button"
               size="xs"
-              variant={activeDate === gallery.yesterday ? 'default' : 'outline'}
+              variant={activeDate === gallery.yesterday ? 'secondary' : 'ghost'}
+              className={`shrink-0 ${activeDate === gallery.yesterday ? 'ring-1 ring-border font-medium text-foreground' : 'text-muted-foreground'}`}
               onClick={() => void load({ date: gallery.yesterday })}
             >
               昨日
@@ -212,8 +232,8 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
                 key={link.date}
                 type="button"
                 size="xs"
-                variant={activeDate === link.date ? 'default' : 'outline'}
-                className="hidden sm:inline-flex"
+                variant={activeDate === link.date ? 'secondary' : 'ghost'}
+                className={`shrink-0 ${activeDate === link.date ? 'ring-1 ring-border font-medium text-foreground' : 'text-muted-foreground'}`}
                 onClick={() => void load({ date: link.date })}
               >
                 {link.label}
@@ -221,11 +241,12 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="no-scrollbar flex shrink-0 flex-nowrap items-center gap-1 overflow-x-auto">
             <Button
               type="button"
               size="xs"
-              variant={activeExt === '' ? 'default' : 'secondary'}
+              variant={activeExt === '' ? 'secondary' : 'ghost'}
+              className={`shrink-0 ${activeExt === '' ? 'ring-1 ring-border font-medium text-foreground' : 'text-muted-foreground'}`}
               onClick={() => void load({ ext: '' })}
             >
               全部
@@ -235,8 +256,8 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
                 key={ext}
                 type="button"
                 size="xs"
-                variant={activeExt === ext ? 'default' : 'secondary'}
-                className="font-mono uppercase"
+                variant={activeExt === ext ? 'secondary' : 'ghost'}
+                className={`shrink-0 font-mono uppercase ${activeExt === ext ? 'ring-1 ring-border font-medium text-foreground' : 'text-muted-foreground'}`}
                 onClick={() => void load({ ext })}
               >
                 {ext}

@@ -8,8 +8,6 @@
     <meta name="color-scheme" content="light dark">
     <script>(function(){try{var t=localStorage.getItem('easyimage-theme');var d=t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;if(d){r.classList.add('dark');r.style.colorScheme='dark'}else{r.style.colorScheme='light'}}catch(e){}})();</script>
     <style>
-        @view-transition { navigation: auto; }
-        ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 200ms; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); }
         :root { --bg:#ffffff; --fg:#0a0a0a; --muted-fg:#666664; --border:#e6e6e4; }
         html { background: var(--bg); color: var(--fg); color-scheme: light; }
         html.dark { --bg:#0a0a0a; --fg:#f7f7f5; --muted-fg:#9a9a98; --border:rgba(255,255,255,0.11); color-scheme: dark; }

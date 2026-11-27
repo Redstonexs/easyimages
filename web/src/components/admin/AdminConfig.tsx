@@ -15,6 +15,7 @@ import type { AdminConfig as AdminConfigType, AdminOverview } from '@/types'
 import type { NoticeType } from '@/shared/notify'
 import { adminApi } from '@/shared/adminApi'
 import { normalizeStorageSources, validateStorageSources } from '@/shared/storageSources'
+import { fetchCached, getCached, setCached } from '@/shared/swrCache'
 import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -33,13 +34,22 @@ interface AdminConfigProps {
 }
 
 export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProps) {
-  const [loading, setLoading] = useState(true)
+  const initialOverview = getCached<AdminOverview>('admin:overview')
+  const initialNormalizedConfig = useMemo(() => {
+    if (!initialOverview) return null
+    return {
+      ...initialOverview.config,
+      storage_sources: normalizeStorageSources(initialOverview.config.storage_sources)
+    }
+  }, [initialOverview])
+
+  const [loading, setLoading] = useState(!initialOverview)
   const [saving, setSaving] = useState(false)
   const [converting, setConverting] = useState(false)
   const [uploadingIcon, setUploadingIcon] = useState(false)
-  const [overview, setOverview] = useState<AdminOverview | null>(null)
-  const [config, setConfig] = useState<AdminConfigType | null>(null)
-  const [snapshot, setSnapshot] = useState('')
+  const [overview, setOverview] = useState<AdminOverview | null>(initialOverview ?? null)
+  const [config, setConfig] = useState<AdminConfigType | null>(initialNormalizedConfig)
+  const [snapshot, setSnapshot] = useState(() => (initialNormalizedConfig ? JSON.stringify(initialNormalizedConfig) : ''))
   const siteIconInputRef = useRef<HTMLInputElement>(null)
   const showSkeleton = useDelayedLoading(loading)
 
@@ -47,6 +57,8 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
     if (!config || !snapshot) return false
     return JSON.stringify(config) !== snapshot
   }, [config, snapshot])
+  const dirtyRef = useRef(isDirty)
+  dirtyRef.current = isDirty
 
   useEffect(() => {
     onDirtyChange(isDirty)
@@ -68,14 +80,20 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
   useEffect(() => {
     let cancelled = false
     async function load() {
-      setLoading(true)
+      const hadCache = Boolean(getCached<AdminOverview>('admin:overview'))
+      if (!hadCache) setLoading(true)
       try {
-        const data = await adminApi.overview()
+        const data = await fetchCached('admin:overview', () => adminApi.overview(), 5_000)
         if (cancelled) return
-        data.config.storage_sources = normalizeStorageSources(data.config.storage_sources)
+        const normalized: AdminConfigType = {
+          ...data.config,
+          storage_sources: normalizeStorageSources(data.config.storage_sources)
+        }
         setOverview(data)
-        setConfig(data.config)
-        setSnapshot(JSON.stringify(data.config))
+        if (!dirtyRef.current) {
+          setConfig(normalized)
+          setSnapshot(JSON.stringify(normalized))
+        }
       } catch (error) {
         if (!cancelled) onNotice(error instanceof Error ? error.message : '加载配置失败', 'danger')
       } finally {
@@ -108,6 +126,9 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
       result.config.storage_sources = normalizeStorageSources(result.config.storage_sources)
       setConfig(result.config)
       setSnapshot(JSON.stringify(result.config))
+      if (overview) {
+        setCached('admin:overview', { ...overview, config: result.config })
+      }
       onNotice(result.msg || '配置已保存', 'success')
     } catch (error) {
       onNotice(error instanceof Error ? error.message : '保存失败', 'danger')
@@ -184,7 +205,7 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
   if (loading) {
     if (!showSkeleton) return <div className="min-h-[420px]" aria-busy="true" />
     return (
-      <div className="panel-enter space-y-4">
+      <div className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Skeleton className="h-24 rounded-xl" />
           <Skeleton className="h-24 rounded-xl" />
@@ -198,7 +219,7 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
   if (!config) return null
 
   return (
-    <form onSubmit={save} className="panel-enter space-y-6 pb-20">
+    <form onSubmit={save} className="space-y-6 pb-20">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Card className="gap-1 py-4">
           <CardContent className="flex items-center justify-between">
