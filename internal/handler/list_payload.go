@@ -242,8 +242,3 @@ func isSafeDatePath(datePath string) bool {
 	}
 	return true
 }
-
-func setFrontendAPIHeaders(c *gin.Context) {
-	c.Header("Cache-Control", "public, max-age=30, stale-while-revalidate=300")
-	c.Header("Vary", "Cookie")
-}

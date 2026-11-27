@@ -11,7 +11,7 @@ EasyImage 是一个无数据库图床服务。当前仓库已以 Go 版本为主
 - 单二进制部署，无需 PHP 运行环境
 - 无数据库，图片默认存储在 `i/`
 - 支持 Web 上传、粘贴上传和 API 上传
-- 支持管理员后台、上传历史、图片列表和文件管理
+- 支持管理员后台、上传历史和文件管理
 - 图片库支持租户账号、存储配额、内部目录和可配置的公开链接
 - 支持按请求转换图像，也可在指定目录保存 JPEG、PNG 和 WebP 版本
 - 支持缩略图、压缩、水印、WebP 转换和热链保护
@@ -67,36 +67,33 @@ curl -X POST http://localhost:8080/api/index \
 ```text
 .
 ├── main.go                  # 应用入口、路由和启动逻辑
-├── config/                  # Go 配置代码和 PHP 迁移输入
-├── internal/                # handler、middleware、service
+├── config/                  # Go 配置代码和自动 PHP 迁移逻辑
+├── internal/                # handler、middleware、service、workspace
 ├── templates/               # Go HTML 模板
 ├── public/                  # 静态资源
 ├── public/dist/             # 前端构建产物，本地生成，不提交
-├── cmd/php2json/            # 手动 PHP 配置转换工具
-├── cmd/migrate_test/        # 迁移状态检查工具
 ├── docs/                    # 用户文档
 ├── i/                       # 运行时图片存储，除 .gitkeep 外不提交
 └── admin/logs/              # 运行时日志，不提交
 ```
 
-运行态文件不会提交到仓库：`config/config.json`、`config/config.guest.json`、`config/api_key.json`、`config/install.lock`、`config/php_backup/`、`admin/logs/` 和 `i/`。
+运行态文件不会提交到仓库：`config/config.json`、`config/api_key.json`、`config/*.php`、`config/install.lock`、`admin/logs/` 和 `i/`。
 
-图片库账号、目录、配额和图片文件保存在 `admin/logs/workspace/`。旧图片、S3 对象和原有上传接口沿用原来的存储与链接。图片库用法见 [API 文档](docs/API.md#图片库-api-v1)。
+图片库账号、目录、配额和图片文件保存在 `admin/logs/workspace/`。管理员可在图片库按目录查看旧图，直接复制原图和已有的 WebP 链接。旧图片、S3 对象和原有上传接口沿用原来的存储与链接。图片库用法见 [API 文档](docs/API.md#图片库-api-v1)。
 
 ## 配置和迁移
 
 全新安装时无需手写配置，安装流程会生成 `config/config.json` 和 `config/install.lock`。
 
-从 PHP 版本迁移时，把旧站点的以下文件复制到 `config/` 后启动 Go 服务：
+从 PHP 版本迁移时，先自行备份旧站点文件，再把旧站点的 `config.php`（以及可选的 `api_key.php`）复制到 `config/` 后启动 Go 服务：
 
 ```bash
 cp /path/to/php/config/config.php config/
-cp /path/to/php/config/config.guest.php config/
 cp /path/to/php/config/api_key.php config/
 ./easyimage
 ```
 
-启动时会解析 PHP 数组配置，生成 Go JSON 配置，并把原 PHP 配置备份到 `config/php_backup/`。完整说明见 [从PHP迁移到Go版本](docs/从PHP迁移到Go版本.md)。
+启动时会自动解析 PHP 数组配置，生成 Go JSON 配置与 `config/install.lock`，并在写入成功后自动删除旧的 `.php` 文件（若解析失败则会保留原文件）。完整说明见 [从PHP迁移到Go版本](docs/从PHP迁移到Go版本.md)。
 
 ## 开发命令
 
@@ -106,8 +103,6 @@ go vet ./...
 npm run typecheck
 npm run build
 go build -o easyimage .
-go run ./cmd/php2json config/config.php config/config.json
-go run ./cmd/migrate_test
 ```
 
 `public/dist/` 是 Vite 构建输出，已在 `.gitignore` 中排除。本地直接运行二进制前需要先执行 `npm run build`；Docker 镜像构建会自动生成这些前端资源。

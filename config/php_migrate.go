@@ -1,663 +1,514 @@
 package config
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
+	"log"
 	"os"
-	"path/filepath"
-	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// PHPConfigParser PHP配置解析器
-type PHPConfigParser struct {
-	filePath string
-}
+const (
+	legacyPHPConfigFile = "config/config.php"
+	legacyPHPAPIKeyFile = "config/api_key.php"
+	legacyPHPGuestFile  = "config/config.guest.php"
+)
 
-// NewPHPConfigParser 创建PHP配置解析器
-func NewPHPConfigParser(filePath string) *PHPConfigParser {
-	return &PHPConfigParser{filePath: filePath}
-}
-
-// Parse 解析PHP配置文件
-func (p *PHPConfigParser) Parse() (map[string]interface{}, error) {
-	file, err := os.Open(p.filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	config := make(map[string]interface{})
-	scanner := bufio.NewScanner(file)
-
-	// 匹配PHP数组格式: 'key'=>'value' 或 'key'=>value 或 'key'=>数字
-	keyValueRe := regexp.MustCompile(`'([^']+)'\s*=>\s*(?:'([^']*)'|(\d+(?:\.\d+)?)|Array\s*\()`)
-	// 匹配数组结束
-	arrayEndRe := regexp.MustCompile(`^\s*\)\s*;`)
-	// 匹配数组开始
-	arrayStartRe := regexp.MustCompile(`'([^']+)'\s*=>\s*Array\s*\(`)
-
-	var currentKey string
-	inArray := false
-	arrayConfig := make(map[string]interface{})
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		// 跳过PHP标签和空行
-		if line == "" || strings.HasPrefix(line, "<?php") || strings.HasPrefix(line, "$config") ||
-			strings.HasPrefix(line, "$guestConfig") || strings.HasPrefix(line, "$tokenList") {
-			continue
-		}
-
-		// 检查数组结束
-		if arrayEndRe.MatchString(line) {
-			if inArray {
-				config[currentKey] = arrayConfig
-				arrayConfig = make(map[string]interface{})
-				inArray = false
-			}
-			continue
-		}
-
-		// 检查数组开始
-		if matches := arrayStartRe.FindStringSubmatch(line); len(matches) > 0 {
-			currentKey = matches[1]
-			inArray = true
-			continue
-		}
-
-		// 匹配键值对
-		matches := keyValueRe.FindStringSubmatch(line)
-		if len(matches) > 0 {
-			key := matches[1]
-			var value interface{}
-
-			if matches[2] != "" {
-				// 字符串值
-				value = matches[2]
-			} else if matches[3] != "" {
-				// 数字值
-				if strings.Contains(matches[3], ".") {
-					value = matches[3] // 保持为字符串
-				} else {
-					value = matches[3] // 保持为字符串，后续转换
-				}
-			}
-
-			if inArray {
-				arrayConfig[key] = value
-			} else {
-				config[key] = value
-			}
-		}
-	}
-
-	return config, nil
-}
-
-// AutoMigrate 自动迁移PHP配置到Go配置
-func AutoMigrate() error {
-	// 检查是否已有已安装或自定义的Go配置
+// AutoMigrate detects legacy PHP EasyImage config files in config/, converts
+// them into Go JSON configs, and removes the old PHP files once persisted.
+// It returns migrated=true when at least one PHP config file was migrated.
+func AutoMigrate() (bool, error) {
 	if HasInstalledOrCustomizedGoConfig() {
-		return nil
+		return false, nil
 	}
 
-	// 检查是否存在可迁移的PHP配置
-	if !HasMigratablePHPConfig() {
-		return nil
+	hasConfig := fileExists(legacyPHPConfigFile)
+	hasAPIKeys := fileExists(legacyPHPAPIKeyFile)
+	hasGuest := fileExists(legacyPHPGuestFile)
+	if !hasConfig && !hasAPIKeys && !hasGuest {
+		return false, nil
 	}
 
-	fmt.Println("检测到PHP版本配置，开始自动迁移...")
+	var migratedFiles []string
 
-	// 解析PHP配置
-	phpConfigFile := "config/config.php"
-	parser := NewPHPConfigParser(phpConfigFile)
-	phpConfig, err := parser.Parse()
+	if hasConfig {
+		phpConfig, err := parsePHPConfigFile(legacyPHPConfigFile)
+		if err != nil {
+			return false, fmt.Errorf("parse %s: %w", legacyPHPConfigFile, err)
+		}
+		if len(phpConfig) == 0 {
+			return false, fmt.Errorf("parse %s: no configuration entries found", legacyPHPConfigFile)
+		}
+
+		goConfig := convertPHPToGoConfig(phpConfig)
+		if err := Save(goConfig); err != nil {
+			return false, fmt.Errorf("save config/config.json: %w", err)
+		}
+		if err := writeFileAtomic("config/install.lock", []byte("installed from PHP migration"), 0644); err != nil {
+			return false, fmt.Errorf("write config/install.lock: %w", err)
+		}
+		migratedFiles = append(migratedFiles, legacyPHPConfigFile)
+	}
+
+	if hasAPIKeys {
+		phpKeys, err := parsePHPConfigFile(legacyPHPAPIKeyFile)
+		if err != nil {
+			return false, fmt.Errorf("parse %s: %w", legacyPHPAPIKeyFile, err)
+		}
+		keys := convertPHPToAPIKeys(phpKeys)
+		if err := SaveAPIKeys(keys); err != nil {
+			return false, fmt.Errorf("save config/api_key.json: %w", err)
+		}
+		migratedFiles = append(migratedFiles, legacyPHPAPIKeyFile)
+	}
+
+	if hasGuest {
+		if guests, err := parsePHPConfigFile(legacyPHPGuestFile); err == nil && len(guests) > 0 {
+			log.Printf("[Migrate] 检测到 %d 个旧版 PHP 上传者账号（%s）；Go 版本已改用工作区账号管理，将清理旧 PHP 文件", len(guests), legacyPHPGuestFile)
+		}
+		migratedFiles = append(migratedFiles, legacyPHPGuestFile)
+	}
+
+	// Only remove PHP source files after all target JSON configs are safely persisted.
+	for _, path := range migratedFiles {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("[Migrate] Warning: failed to remove migrated PHP file %s: %v", path, err)
+		}
+	}
+
+	return true, nil
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func parsePHPConfigFile(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("failed to parse PHP config: %w", err)
+		return nil, err
 	}
-
-	// 转换为Go配置
-	goConfig := convertPHPToGoConfig(phpConfig)
-
-	// 保存Go配置
-	if err := Save(goConfig); err != nil {
-		return fmt.Errorf("failed to save Go config: %w", err)
-	}
-
-	// 迁移上传者配置
-	if err := migrateGuestConfig(); err != nil {
-		fmt.Printf("Warning: failed to migrate guest config: %v\n", err)
-	}
-
-	// 迁移API密钥配置
-	if err := migrateAPIKeys(); err != nil {
-		fmt.Printf("Warning: failed to migrate API keys: %v\n", err)
-	}
-
-	// 创建安装锁文件
-	os.WriteFile("config/install.lock", []byte("installed from PHP migration"), 0644)
-
-	fmt.Println("自动迁移完成！")
-	fmt.Printf("迁移的配置项: %d\n", len(phpConfig))
-
-	return nil
+	return parsePHPArray(string(data))
 }
 
-// convertPHPToGoConfig 将PHP配置转换为Go配置
-func convertPHPToGoConfig(phpConfig map[string]interface{}) *Config {
-	cfg := getDefaultConfig()
-
-	// 映射PHP配置到Go配置
-	if v, ok := phpConfig["title"].(string); ok {
-		cfg.Title = v
-	}
-	if v, ok := phpConfig["keywords"].(string); ok {
-		cfg.Keywords = v
-	}
-	if v, ok := phpConfig["description"].(string); ok {
-		cfg.Description = v
-	}
-	if v, ok := phpConfig["domain"].(string); ok {
-		cfg.Domain = v
-	}
-	if v, ok := phpConfig["imgurl"].(string); ok {
-		cfg.ImageURL = v
-	}
-	if v, ok := phpConfig["user"].(string); ok {
-		cfg.User = v
-	}
-	if v, ok := phpConfig["password"].(string); ok {
-		cfg.Password = v
-	}
-	if v, ok := phpConfig["path"].(string); ok {
-		cfg.Path = v
-	}
-	if v, ok := phpConfig["storage_path"].(string); ok {
-		cfg.StoragePath = v
-	}
-	if v, ok := phpConfig["mime"].(string); ok {
-		cfg.Mime = v
-	}
-	if v, ok := phpConfig["imgName"].(string); ok {
-		cfg.ImgName = v
-	}
-	if v, ok := phpConfig["maxSize"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.MaxSize = int64(n)
-		}
-	}
-	if v, ok := phpConfig["maxUploadFiles"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.MaxUploadFiles = n
-		}
-	}
-	if v, ok := phpConfig["extensions"].(string); ok {
-		cfg.Extensions = v
-	}
-	if v, ok := phpConfig["compress"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.Compress = n
-		}
-	}
-	if v, ok := phpConfig["compress_ratio"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.CompressRatio = n
-		}
-	}
-	if v, ok := phpConfig["thumbnail"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.Thumbnail = n
-		}
-	}
-	if v, ok := phpConfig["thumbnail_w"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.ThumbnailW = n
-		}
-	}
-	if v, ok := phpConfig["thumbnail_h"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.ThumbnailH = n
-		}
-	}
-	if v, ok := phpConfig["watermark"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.Watermark = n
-		}
-	}
-	if v, ok := phpConfig["waterText"].(string); ok {
-		cfg.WaterText = v
-	}
-	if v, ok := phpConfig["waterPosition"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.WaterPosition = n
-		}
-	}
-	if v, ok := phpConfig["textColor"].(string); ok {
-		cfg.TextColor = v
-	}
-	if v, ok := phpConfig["textSize"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.TextSize = n
-		}
-	}
-	if v, ok := phpConfig["textFont"].(string); ok {
-		cfg.TextFont = v
-	}
-	if v, ok := phpConfig["waterImg"].(string); ok {
-		cfg.WaterImg = v
-	}
-	if v, ok := phpConfig["imgConvert"].(string); ok {
-		cfg.ImgConvert = v
-	}
-	if v, ok := phpConfig["maxWidth"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.MaxWidth = n
-		}
-	}
-	if v, ok := phpConfig["maxHeight"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.MaxHeight = n
-		}
-	}
-	if v, ok := phpConfig["minWidth"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.MinWidth = n
-		}
-	}
-	if v, ok := phpConfig["minHeight"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.MinHeight = n
-		}
-	}
-	if v, ok := phpConfig["mustLogin"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.MustLogin = n
-		}
-	}
-	if v, ok := phpConfig["apiStatus"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.APIStatus = n
-		}
-	}
-	if v, ok := phpConfig["captcha"].(string); ok {
-		if _, err := parseInt(v); err == nil {
-			// PHP版本的验证码系统与Go版本不同，迁移时默认禁用验证码
-			// 用户可在管理后台手动重新配置
-			cfg.Captcha = 0
-		}
-	}
-	if v, ok := phpConfig["check_ip"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.CheckIP = n
-		}
-	}
-	if v, ok := phpConfig["check_ip_model"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.CheckIPModel = n
-		}
-	}
-	if v, ok := phpConfig["check_ip_list"].(string); ok {
-		cfg.CheckIPList = v
-	}
-	if v, ok := phpConfig["md5_black"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.Md5Black = n
-		}
-	}
-	if v, ok := phpConfig["md5_blacklist"].(string); ok {
-		cfg.Md5Blacklist = v
-	}
-	if v, ok := phpConfig["upload_logs"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.UploadLogs = n
-		}
-	}
-	if v, ok := phpConfig["hide"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.Hide = n
-		}
-	}
-	if v, ok := phpConfig["hide_key"].(string); ok {
-		cfg.HideKey = v
-	}
-	if v, ok := phpConfig["hide_path"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.HidePath = n
-		}
-	}
-	if v, ok := phpConfig["admin_path_status"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.AdminPathStatus = n
-		}
-	}
-	if v, ok := phpConfig["admin_path"].(string); ok {
-		cfg.AdminPath = v
-	}
-	if v, ok := phpConfig["guest_path_status"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.GuestPathStatus = n
-		}
-	}
-	if v, ok := phpConfig["token_path_status"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.TokenPathStatus = n
-		}
-	}
-	if v, ok := phpConfig["token_suffix_ID"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.TokenSuffixID = n
-		}
-	}
-	if v, ok := phpConfig["image_recycl"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.ImageRecycle = n
-		}
-	}
-	if v, ok := phpConfig["show_user_hash_del"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.ShowUserHashDel = n
-		}
-	}
-	if v, ok := phpConfig["showSwitch"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.ShowSwitch = n
-		}
-	}
-	if v, ok := phpConfig["history"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.History = n
-		}
-	}
-	if v, ok := phpConfig["showSort"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.ShowSort = n
-		}
-	}
-	if v, ok := phpConfig["listNumber"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.ListNumber = n
-		}
-	}
-	if v, ok := phpConfig["listDate"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.ListDate = n
-		}
-	}
-	if v, ok := phpConfig["timezone"].(string); ok {
-		cfg.Timezone = v
-	}
-	if v, ok := phpConfig["auto_delete"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.AutoDelete = n
-		}
-	}
-	if v, ok := phpConfig["ip_upload_counts"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.IPUploadCounts = n
-		}
-	}
-	if v, ok := phpConfig["theme"].(string); ok {
-		cfg.Theme = v
-	}
-	if v, ok := phpConfig["dark-mode"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.DarkMode = n
-		}
-	}
-	if v, ok := phpConfig["show_admin_inc"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.ShowAdminInc = n
-		}
-	}
-	if v, ok := phpConfig["show_exif_info"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.ShowExifInfo = n
-		}
-	}
-	if v, ok := phpConfig["allowed"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.Allowed = n
-		}
-	}
-	if v, ok := phpConfig["chunks"].(string); ok {
-		if n, err := parseInt(v); err == nil {
-			cfg.Chunks = n
-		}
-	}
-
-	// 设置端口
-	cfg.Port = 8080
-	cfg.Update = time.Now().Format("2006-01-02 15:04:05")
-
-	return cfg
-}
-
-// migrateGuestConfig 迁移上传者配置
-func migrateGuestConfig() error {
-	phpFile := "config/config.guest.php"
-	if _, err := os.Stat(phpFile); os.IsNotExist(err) {
-		return nil
-	}
-
-	parser := NewPHPConfigParser(phpFile)
-	phpConfig, err := parser.Parse()
+// parsePHPArray parses the top-level associative array from a PHP config file
+// (supporting both Array(...) / array(...) across multiple lines and [...] syntax).
+func parsePHPArray(src string) (map[string]any, error) {
+	p := &phpArrayParser{src: src}
+	if !p.seekRootArray() {
+		return nil, fmt.Errorf("no PHP array found")
+	}
+	val, err := p.parseArray()
 	if err != nil {
-		return err
+		return nil, err
 	}
+	m, ok := val.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("root PHP array is not associative")
+	}
+	return m, nil
+}
 
-	guestConfig := make(map[string]*GuestConfig)
-	for key, value := range phpConfig {
-		if arr, ok := value.(map[string]interface{}); ok {
-			gc := &GuestConfig{}
-			if v, ok := arr["password"].(string); ok {
-				gc.Password = v
-			}
-			if v, ok := arr["expired"].(string); ok {
-				if n, err := parseInt(v); err == nil {
-					gc.Expired = int64(n)
-				}
-			}
-			if v, ok := arr["add_time"].(string); ok {
-				if n, err := parseInt(v); err == nil {
-					gc.AddTime = int64(n)
-				}
-			}
-			guestConfig[key] = gc
+type phpArrayParser struct {
+	src string
+	pos int
+}
+
+func (p *phpArrayParser) skipTrivia() {
+	for p.pos < len(p.src) {
+		ch := p.src[p.pos]
+		if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' {
+			p.pos++
+			continue
 		}
-	}
-
-	return SaveGuestConfig(guestConfig)
-}
-
-// migrateAPIKeys 迁移API密钥配置
-func migrateAPIKeys() error {
-	phpFile := "config/api_key.php"
-	if _, err := os.Stat(phpFile); os.IsNotExist(err) {
-		return nil
-	}
-
-	parser := NewPHPConfigParser(phpFile)
-	phpConfig, err := parser.Parse()
-	if err != nil {
-		return err
-	}
-
-	apiKeys := make(map[string]*APIKey)
-	for key, value := range phpConfig {
-		if arr, ok := value.(map[string]interface{}); ok {
-			ak := &APIKey{}
-			if v, ok := arr["id"].(string); ok {
-				if n, err := parseInt(v); err == nil {
-					ak.ID = n
+		if ch == '/' && p.pos+1 < len(p.src) {
+			if p.src[p.pos+1] == '/' {
+				p.pos += 2
+				for p.pos < len(p.src) && p.src[p.pos] != '\n' {
+					p.pos++
 				}
+				continue
 			}
-			if v, ok := arr["expired"].(string); ok {
-				if n, err := parseInt(v); err == nil {
-					ak.Expired = int64(n)
+			if p.src[p.pos+1] == '*' {
+				p.pos += 2
+				if end := strings.Index(p.src[p.pos:], "*/"); end >= 0 {
+					p.pos += end + 2
+				} else {
+					p.pos = len(p.src)
 				}
+				continue
 			}
-			if v, ok := arr["add_time"].(string); ok {
-				if n, err := parseInt(v); err == nil {
-					ak.AddTime = int64(n)
-				}
-			}
-			apiKeys[key] = ak
 		}
+		if ch == '#' {
+			p.pos++
+			for p.pos < len(p.src) && p.src[p.pos] != '\n' {
+				p.pos++
+			}
+			continue
+		}
+		break
 	}
-
-	return SaveAPIKeys(apiKeys)
 }
 
-// parseInt 解析整数
-func parseInt(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
-}
-
-// HasMigratablePHPConfig reports whether config/config.php looks like a real
-// user PHP configuration rather than the bundled default sample.
-func HasMigratablePHPConfig() bool {
-	phpConfigFile := "config/config.php"
-	if _, err := os.Stat(phpConfigFile); err != nil {
-		return false
+func (p *phpArrayParser) seekRootArray() bool {
+	for p.pos < len(p.src) {
+		p.skipTrivia()
+		if p.pos >= len(p.src) {
+			return false
+		}
+		if p.isArrayStart() {
+			return true
+		}
+		ch := p.src[p.pos]
+		if ch == '\'' || ch == '"' {
+			if _, err := p.parseString(); err != nil {
+				return false
+			}
+			continue
+		}
+		p.pos++
 	}
-
-	parser := NewPHPConfigParser(phpConfigFile)
-	phpConfig, err := parser.Parse()
-	if err != nil {
-		return true
-	}
-
-	if !isBundledDefaultPHPConfig(phpConfig) {
-		return true
-	}
-	if hasNonBundledPHPFile("config/config.guest.php", bundledDefaultGuestConfigPHP) {
-		return true
-	}
-	if hasNonBundledPHPFile("config/api_key.php", bundledDefaultAPIKeyPHP) {
-		return true
-	}
-
 	return false
 }
 
-func hasNonBundledPHPFile(path string, bundledDefault string) bool {
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+func (p *phpArrayParser) isArrayStart() bool {
+	if p.pos >= len(p.src) {
 		return false
 	}
-	if err != nil {
+	if p.src[p.pos] == '[' {
 		return true
 	}
-
-	return normalizePHPConfig(string(data)) != normalizePHPConfig(bundledDefault)
-}
-
-func normalizePHPConfig(data string) string {
-	data = strings.ReplaceAll(data, "\r\n", "\n")
-	return strings.TrimSpace(data)
-}
-
-func isBundledDefaultPHPConfig(phpConfig map[string]interface{}) bool {
-	bundledDefaults := map[string]string{
-		"title":        "简单图床 - EasyImage",
-		"domain":       "http://127.0.0.1",
-		"imgurl":       "http://127.0.0.1",
-		"user":         "admin",
-		"password":     defaultPasswordHash,
-		"path":         "/i/",
-		"storage_path": "Y/m/d/",
-		"update":       "2025-07-04 19:28:57",
-	}
-
-	for key, want := range bundledDefaults {
-		got, ok := phpConfig[key].(string)
-		if !ok || got != want {
+	if len(p.src)-p.pos >= 5 && strings.EqualFold(p.src[p.pos:p.pos+5], "array") {
+		// Ensure "array" is not part of a longer identifier (e.g. "myarray" or "$array").
+		if p.pos > 0 && isIdentChar(p.src[p.pos-1]) {
 			return false
 		}
-	}
-
-	return true
-}
-
-const bundledDefaultGuestConfigPHP = `<?php
-$guestConfig=Array
-	(
-	'guest'=>Array
-		(
-		'password'=>'84983c60f7daadc1cb8698621f802c0d9f9a3c3c295c810748fb048115c186ec',
-		'expired'=>1765301956,
-		'add_time'=>1678988356
-		)
-	);
-`
-
-const bundledDefaultAPIKeyPHP = `<?php
-$tokenList=Array
-	(
-	'1c17b11693cb5ec63859b091c5b9c1b2'=>Array
-		(
-		'id'=>0,
-		'expired'=>2544411528,
-		'add_time'=>1680497928
-		),
-	'833c5611862efcaa9955205ee96125e9'=>Array
-		(
-		'id'=>2,
-		'expired'=>1680584583,
-		'add_time'=>1680498183
-		)
-	);
-`
-
-// MigratePHPData 迁移PHP数据目录
-func MigratePHPData() error {
-	// 确保图片目录存在
-	dirs := []string{
-		"i",
-		"i/cache",
-		"i/suspic",
-		"i/recycle",
-		"admin/logs/upload",
-		"admin/logs/ipcounts",
-	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		next := p.pos + 5
+		if next < len(p.src) && isIdentChar(p.src[next]) {
+			return false
 		}
+		saved := p.pos
+		p.pos = next
+		p.skipTrivia()
+		hasParen := p.pos < len(p.src) && p.src[p.pos] == '('
+		p.pos = saved
+		return hasParen
 	}
-
-	return nil
+	return false
 }
 
-// BackupPHPConfig 备份PHP配置文件
-func BackupPHPConfig() error {
-	backupDir := "config/php_backup"
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
-		return err
+func (p *phpArrayParser) parseArray() (any, error) {
+	p.skipTrivia()
+	var closeCh byte
+	if p.pos < len(p.src) && p.src[p.pos] == '[' {
+		closeCh = ']'
+		p.pos++
+	} else if len(p.src)-p.pos >= 5 && strings.EqualFold(p.src[p.pos:p.pos+5], "array") {
+		p.pos += 5
+		p.skipTrivia()
+		if p.pos >= len(p.src) || p.src[p.pos] != '(' {
+			return nil, fmt.Errorf("expected '(' after array at offset %d", p.pos)
+		}
+		closeCh = ')'
+		p.pos++
+	} else {
+		return nil, fmt.Errorf("expected array at offset %d", p.pos)
 	}
 
-	phpFiles := []string{
-		"config/config.php",
-		"config/config.guest.php",
-		"config/api_key.php",
-	}
+	assoc := make(map[string]any)
+	var list []any
+	isAssoc := false
 
-	for _, file := range phpFiles {
-		if _, err := os.Stat(file); err == nil {
-			data, err := os.ReadFile(file)
+	for {
+		p.skipTrivia()
+		if p.pos >= len(p.src) {
+			return nil, fmt.Errorf("unterminated PHP array")
+		}
+		if p.src[p.pos] == closeCh {
+			p.pos++
+			if isAssoc || len(list) == 0 {
+				return assoc, nil
+			}
+			return list, nil
+		}
+
+		first, err := p.parseValue()
+		if err != nil {
+			return nil, err
+		}
+		p.skipTrivia()
+
+		if p.pos+1 < len(p.src) && p.src[p.pos] == '=' && p.src[p.pos+1] == '>' {
+			p.pos += 2
+			val, err := p.parseValue()
 			if err != nil {
+				return nil, err
+			}
+			if !isAssoc && len(list) > 0 {
+				for i, item := range list {
+					assoc[strconv.Itoa(i)] = item
+				}
+				list = nil
+			}
+			isAssoc = true
+			assoc[fmt.Sprint(first)] = val
+		} else if isAssoc {
+			assoc[strconv.Itoa(len(assoc))] = first
+		} else {
+			list = append(list, first)
+		}
+
+		p.skipTrivia()
+		if p.pos < len(p.src) && p.src[p.pos] == ',' {
+			p.pos++
+			continue
+		}
+		if p.pos < len(p.src) && p.src[p.pos] == closeCh {
+			p.pos++
+			if isAssoc || len(list) == 0 {
+				return assoc, nil
+			}
+			return list, nil
+		}
+		return nil, fmt.Errorf("expected ',' or '%c' at offset %d", closeCh, p.pos)
+	}
+}
+
+func (p *phpArrayParser) parseValue() (any, error) {
+	p.skipTrivia()
+	if p.pos >= len(p.src) {
+		return nil, fmt.Errorf("unexpected EOF in PHP array")
+	}
+	if p.isArrayStart() {
+		return p.parseArray()
+	}
+	ch := p.src[p.pos]
+	if ch == '\'' || ch == '"' {
+		return p.parseString()
+	}
+	start := p.pos
+	for p.pos < len(p.src) {
+		c := p.src[p.pos]
+		if c == ',' || c == ')' || c == ']' || c == '=' || c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			break
+		}
+		p.pos++
+	}
+	token := p.src[start:p.pos]
+	if token == "" {
+		return nil, fmt.Errorf("unexpected character %q at offset %d", ch, p.pos)
+	}
+	switch strings.ToLower(token) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	case "null":
+		return nil, nil
+	default:
+		return token, nil
+	}
+}
+
+func (p *phpArrayParser) parseString() (string, error) {
+	quote := p.src[p.pos]
+	p.pos++
+	var b strings.Builder
+	for p.pos < len(p.src) {
+		ch := p.src[p.pos]
+		if ch == '\\' && p.pos+1 < len(p.src) {
+			next := p.src[p.pos+1]
+			if quote == '\'' {
+				if next == '\'' || next == '\\' {
+					b.WriteByte(next)
+					p.pos += 2
+					continue
+				}
+			} else {
+				switch next {
+				case 'n':
+					b.WriteByte('\n')
+				case 'r':
+					b.WriteByte('\r')
+				case 't':
+					b.WriteByte('\t')
+				case '"', '\\', '$':
+					b.WriteByte(next)
+				default:
+					b.WriteByte('\\')
+					b.WriteByte(next)
+				}
+				p.pos += 2
 				continue
 			}
-			backupFile := filepath.Join(backupDir, filepath.Base(file))
-			os.WriteFile(backupFile, data, 0644)
 		}
+		if ch == quote {
+			p.pos++
+			return b.String(), nil
+		}
+		b.WriteByte(ch)
+		p.pos++
+	}
+	return "", fmt.Errorf("unterminated PHP string")
+}
+
+func isIdentChar(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+		(ch >= '0' && ch <= '9') || ch == '_' || ch == '$'
+}
+
+func phpString(m map[string]any, key string) (string, bool) {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return "", false
+	}
+	s, ok := v.(string)
+	return s, ok
+}
+
+func phpInt(m map[string]any, key string) (int, bool) {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(n))
+		return parsed, err == nil
+	case bool:
+		if n {
+			return 1, true
+		}
+		return 0, true
+	default:
+		return 0, false
+	}
+}
+
+func phpInt64(m map[string]any, key string) (int64, bool) {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0, false
+	}
+	if s, ok := v.(string); ok {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+		return parsed, err == nil
+	}
+	return 0, false
+}
+
+func setStringField(m map[string]any, key string, dst *string) {
+	if v, ok := phpString(m, key); ok {
+		*dst = v
+	}
+}
+
+func setIntField(m map[string]any, key string, dst *int) {
+	if v, ok := phpInt(m, key); ok {
+		*dst = v
+	}
+}
+
+func convertPHPToGoConfig(phpConfig map[string]any) *Config {
+	cfg := getDefaultConfig()
+
+	setStringField(phpConfig, "title", &cfg.Title)
+	setStringField(phpConfig, "keywords", &cfg.Keywords)
+	setStringField(phpConfig, "description", &cfg.Description)
+	setStringField(phpConfig, "domain", &cfg.Domain)
+	setStringField(phpConfig, "imgurl", &cfg.ImageURL)
+	setStringField(phpConfig, "user", &cfg.User)
+	setStringField(phpConfig, "password", &cfg.Password)
+	setStringField(phpConfig, "path", &cfg.Path)
+	setStringField(phpConfig, "storage_path", &cfg.StoragePath)
+	setStringField(phpConfig, "mime", &cfg.Mime)
+	setStringField(phpConfig, "imgName", &cfg.ImgName)
+	setStringField(phpConfig, "extensions", &cfg.Extensions)
+	setStringField(phpConfig, "waterText", &cfg.WaterText)
+	setStringField(phpConfig, "textColor", &cfg.TextColor)
+	setStringField(phpConfig, "textFont", &cfg.TextFont)
+	setStringField(phpConfig, "waterImg", &cfg.WaterImg)
+	setStringField(phpConfig, "imgConvert", &cfg.ImgConvert)
+	setStringField(phpConfig, "check_ip_list", &cfg.CheckIPList)
+	setStringField(phpConfig, "md5_blacklist", &cfg.Md5Blacklist)
+	setStringField(phpConfig, "hide_key", &cfg.HideKey)
+	setStringField(phpConfig, "admin_path", &cfg.AdminPath)
+	setStringField(phpConfig, "timezone", &cfg.Timezone)
+	setStringField(phpConfig, "theme", &cfg.Theme)
+
+	if v, ok := phpInt64(phpConfig, "maxSize"); ok {
+		cfg.MaxSize = v
+	}
+	setIntField(phpConfig, "maxUploadFiles", &cfg.MaxUploadFiles)
+	setIntField(phpConfig, "compress", &cfg.Compress)
+	setIntField(phpConfig, "compress_ratio", &cfg.CompressRatio)
+	setIntField(phpConfig, "thumbnail", &cfg.Thumbnail)
+	setIntField(phpConfig, "thumbnail_w", &cfg.ThumbnailW)
+	setIntField(phpConfig, "thumbnail_h", &cfg.ThumbnailH)
+	setIntField(phpConfig, "watermark", &cfg.Watermark)
+	setIntField(phpConfig, "waterPosition", &cfg.WaterPosition)
+	setIntField(phpConfig, "textSize", &cfg.TextSize)
+	setIntField(phpConfig, "maxWidth", &cfg.MaxWidth)
+	setIntField(phpConfig, "maxHeight", &cfg.MaxHeight)
+	setIntField(phpConfig, "minWidth", &cfg.MinWidth)
+	setIntField(phpConfig, "minHeight", &cfg.MinHeight)
+	setIntField(phpConfig, "mustLogin", &cfg.MustLogin)
+	setIntField(phpConfig, "apiStatus", &cfg.APIStatus)
+	setIntField(phpConfig, "check_ip", &cfg.CheckIP)
+	setIntField(phpConfig, "check_ip_model", &cfg.CheckIPModel)
+	setIntField(phpConfig, "md5_black", &cfg.Md5Black)
+	setIntField(phpConfig, "upload_logs", &cfg.UploadLogs)
+	setIntField(phpConfig, "hide", &cfg.Hide)
+	setIntField(phpConfig, "hide_path", &cfg.HidePath)
+	setIntField(phpConfig, "admin_path_status", &cfg.AdminPathStatus)
+	setIntField(phpConfig, "guest_path_status", &cfg.GuestPathStatus)
+	setIntField(phpConfig, "token_path_status", &cfg.TokenPathStatus)
+	setIntField(phpConfig, "token_suffix_ID", &cfg.TokenSuffixID)
+	setIntField(phpConfig, "image_recycl", &cfg.ImageRecycle)
+	setIntField(phpConfig, "show_user_hash_del", &cfg.ShowUserHashDel)
+	setIntField(phpConfig, "showSwitch", &cfg.ShowSwitch)
+	setIntField(phpConfig, "history", &cfg.History)
+	setIntField(phpConfig, "showSort", &cfg.ShowSort)
+	setIntField(phpConfig, "listNumber", &cfg.ListNumber)
+	setIntField(phpConfig, "listDate", &cfg.ListDate)
+	setIntField(phpConfig, "auto_delete", &cfg.AutoDelete)
+	setIntField(phpConfig, "ip_upload_counts", &cfg.IPUploadCounts)
+	setIntField(phpConfig, "dark-mode", &cfg.DarkMode)
+	setIntField(phpConfig, "show_admin_inc", &cfg.ShowAdminInc)
+	setIntField(phpConfig, "show_exif_info", &cfg.ShowExifInfo)
+	setIntField(phpConfig, "allowed", &cfg.Allowed)
+	setIntField(phpConfig, "chunks", &cfg.Chunks)
+
+	// PHP 版本的验证码机制与 Go 版本不同，迁移时统一关闭，用户可在后台重新启用。
+	if _, ok := phpConfig["captcha"]; ok {
+		cfg.Captcha = 0
 	}
 
-	return nil
+	cfg.Port = 8080
+	cfg.Update = time.Now().Format("2006-01-02 15:04:05")
+	setDefaults(cfg)
+	return cfg
+}
+
+func convertPHPToAPIKeys(phpKeys map[string]any) map[string]*APIKey {
+	result := make(map[string]*APIKey, len(phpKeys))
+	for token, raw := range phpKeys {
+		arr, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		ak := &APIKey{}
+		setIntField(arr, "id", &ak.ID)
+		if v, ok := phpInt64(arr, "expired"); ok {
+			ak.Expired = v
+		}
+		if v, ok := phpInt64(arr, "add_time"); ok {
+			ak.AddTime = v
+		}
+		result[token] = ak
+	}
+	return result
 }

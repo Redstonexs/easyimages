@@ -171,15 +171,17 @@ export default function WorkspaceImageDetail({
                   查看原图
                 </a>
               </Button>
-              <Button type="button" variant="outline" size="xs" disabled={busy} onClick={() => void remove()}>
-                <Trash2 className="size-3.5" />
-                删除原图
-              </Button>
+              {!image.legacy && (
+                <Button type="button" variant="outline" size="xs" disabled={busy} onClick={() => void remove()}>
+                  <Trash2 className="size-3.5" />
+                  删除原图
+                </Button>
+              )}
             </div>
           </CardHeader>
 
           <CardContent className="space-y-5">
-            <div className="grid gap-5 md:grid-cols-2">
+            <div className={image.legacy ? '' : 'grid gap-5 md:grid-cols-2'}>
               <a
                 href={image.url}
                 target="_blank"
@@ -194,7 +196,7 @@ export default function WorkspaceImageDetail({
                 />
               </a>
 
-              <form ref={formRef} onSubmit={saveVariant} className="space-y-3">
+              {!image.legacy && <form ref={formRef} onSubmit={saveVariant} className="space-y-3">
                 <p className="text-sm font-medium">实时转换与预生成</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
@@ -317,7 +319,7 @@ export default function WorkspaceImageDetail({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={ROOT_SENTINEL}>根目录</SelectItem>
-                      {folders.map(folder => (
+                      {folders.filter(folder => !folder.browse_only).map(folder => (
                         <SelectItem key={folder.path} value={folder.path}>{folder.path}</SelectItem>
                       ))}
                     </SelectContent>
@@ -334,12 +336,12 @@ export default function WorkspaceImageDetail({
                     {busy ? '处理中...' : '预生成版本'}
                   </Button>
                 </div>
-              </form>
+              </form>}
             </div>
 
-            <Separator />
+            {!image.legacy && <Separator />}
 
-            <div className="space-y-2.5">
+            {!image.legacy && <div className="space-y-2.5">
               <p className="text-sm font-medium">预生成版本（{variants.length}）</p>
               {variants.length === 0 ? (
                 <p className="text-xs text-muted-foreground">暂无预生成版本</p>
@@ -374,7 +376,7 @@ export default function WorkspaceImageDetail({
                   ))}
                 </ul>
               )}
-            </div>
+            </div>}
           </CardContent>
         </>
       )}

@@ -2,14 +2,13 @@
 
 ## What This Is
 
-- EasyImage is a Go/Gin rewrite of a PHP image host: one binary, Go HTML templates, Vue/Vite islands, file-based config/storage, no database. The Go minimum is defined in `go.mod`.
+- EasyImage is a Go/Gin rewrite of a PHP image host: one binary, Go HTML templates, React/Vite islands, file-based config/storage, no database. The Go minimum is defined in `go.mod`.
 - Runtime images live under `i/`; runtime logs, image metadata, and S3 multipart state live under `admin/logs/`; custom site icons live under `config/site-icon/`; frontend build output is `public/dist/`.
-- PHP files in `config/*.php` are versioned migration templates/input, not runtime config.
 
 ## Commands
 
 - Install frontend deps: `npm ci`.
-- Frontend typecheck: `npm run typecheck` (`vue-tsc --noEmit`).
+- Frontend typecheck: `npm run typecheck` (`tsc --noEmit`).
 - Frontend build: `npm run build` (`vite build`, writes gitignored `public/dist/`).
 - All Go tests: `go test ./...`.
 - Focused Go tests: `go test ./internal/service -run TestName`, `go test ./internal/handler -run TestName`, `go test ./internal/middleware -run TestName`, `go test ./internal/storage -run TestName`, or `go test . -run TestName` for root tests.
@@ -17,12 +16,10 @@
 - Build server: `go build -o easyimage .` or `go build -o easyimage.exe .` on Windows.
 - Run locally after building assets: `./easyimage` or `./easyimage.exe`; default port is `:8080` unless `config/config.json` sets `port`.
 - Docker Compose: `docker-compose up -d`; it uses the Node and Go versions pinned in the Dockerfile and mounts `./config`, `./i`, and `./admin/logs`.
-- Manual PHP config converter: `go run ./cmd/php2json config/config.php config/config.json`.
-- Migration status utility: `go run ./cmd/migrate_test`.
 
 ## Generated And Runtime State
 
-- Do not commit local runtime files: `config/config.json`, `config/config.guest.json`, `config/api_key.json`, `config/install.lock`, `config/EasyImage.lock`, `config/php_backup/`, `config/site-icon/`, `admin/logs/`, or files under `i/` except `i/.gitkeep`.
+- Do not commit local runtime files: `config/config.json`, `config/api_key.json`, `config/*.php`, `config/install.lock`, `config/EasyImage.lock`, `config/site-icon/`, `admin/logs/`, or files under `i/` except `i/.gitkeep`.
 - Do not commit `public/dist/`; missing `public/dist/.vite/manifest.json` only logs a warning and skips Vue asset tags, but the Vue UI will not mount until `npm run build` runs.
 - Dockerfile deletes generated JSON config and install locks during image build so first container start can auto-detect copied PHP configs.
 
@@ -32,7 +29,7 @@
 - `config/config.go` owns cached singletons for main config, guest config, and API keys. `config.Load()` returns defaults without saving when JSON is absent; `config.Save(cfg)` writes `config/config.json`.
 - `internal/handler/handler.go` contains HTML handlers, install, upload, chunk upload, API upload, and legacy admin actions.
 - `internal/handler/admin_api.go` contains Vue admin JSON APIs under `/admin/api/*`, site icon upload/serve logic, and secret presence flags instead of external captcha or S3 secret values.
-- `internal/handler/list_payload.go` builds shared gallery/history payloads for `/api/list`, `/app/list`, and admin history APIs.
+- `internal/handler/list_payload.go` builds the payload for `/admin/api/history`.
 - `internal/service/` owns auth/session, file listing/deletion, path safety helpers, image processing, captcha, metadata, and legacy password compatibility.
 - `internal/middleware/` owns login/admin gates and hotlink protection.
 - `templates/` host Vue islands; `web/src/` is Vue/TypeScript source; `public/static/` is legacy static asset content.
@@ -44,13 +41,12 @@
 - Web upload route is `POST /app/upload` and expects multipart field `file`; API upload expects field `image` plus `token` from `config/api_key.json`.
 - Web upload accepts optional `storage_source`; omitted/disabled sources fall back through `cfg.StorageSourceByID` to the default source and then local.
 - Admin HTML routes are under `/admin`; Vue admin data routes are under `/admin/api/*`.
-- Public image list is `GET /api/list`; it validates `date`, `ext`, `q/search`, caps `num` at 500, and searches original filenames through metadata.
+- The workspace image library is at `/admin/workspace` for administrators and `/workspace` for tenants. The admin library includes legacy storage on request.
 
 ## Config And Migration
 
 - Startup skips PHP migration when `config/config.json` is installed/customized or `config/install.lock` exists.
-- Bundled default `config/*.php` templates do not trigger migration; copied real PHP configs do.
-- Auto-migration backs PHP configs up to `config/php_backup/`, migrates PHP data dirs, writes `config/config.json`, `config/config.guest.json`, `config/api_key.json`, and creates `config/install.lock`.
+- The repo and Docker image do not bundle `config/*.php` files. When legacy `config/config.php`, `config/api_key.php`, or `config/config.guest.php` are placed in `config/`, startup parses them, atomically writes `config/config.json` / `config/api_key.json` and `config/install.lock`, and deletes the migrated `.php` files. On parse or write failure, the `.php` files are preserved untouched.
 - Default config values live in `config/config.go`; notable defaults are `Path=/i/`, `StoragePath=Y/m/d/`, `Port=8080`, `ListNumber=20`, `ListDate=10`, `SiteIcon=/favicon.ico`, `DefaultStorageSource=local`, and new installs `MustLogin=1`.
 - Private upload mode is the existing `MustLogin` field: anonymous `GET /` redirects to `/admin/index?redirect=%2F`, while `/app/upload` and chunk routes keep `middleware.CheckLogin(cfg)` JSON 401 behavior for XHR; API upload stays token-authenticated and is not gated by `MustLogin`.
 - Keep `MustLogin=1` in `getDefaultConfig()` for new installs only; do not set it in `setDefaults()` or old `mustLogin:0` configs would be silently changed.
@@ -69,9 +65,9 @@
 
 ## Frontend Notes
 
-- Vite inputs are exactly `web/src/entries/upload.ts`, `web/src/entries/gallery.ts`, and `web/src/entries/admin.ts`; template `{{vite "..."}}` keys must match those manifest keys.
+- Vite inputs are `web/src/entries/upload.ts` and `web/src/entries/admin.ts`. Template `{{vite "..."}}` keys must match those manifest keys.
 - Vite `base` is `/public/dist/` and `publicDir` is `false`; root `public/` is served by Gin, not copied by Vite.
-- Vue mounts use `window.EasyImageUpload`, `window.EasyImageGallery`, and `window.EasyImageAdmin` bootstrap globals defined in templates after module script tags; this relies on module scripts being deferred.
+- React mounts use `window.EasyImageUpload` and `window.EasyImageAdmin` bootstrap globals defined in templates after deferred module script tags.
 - Admin templates all use `admin.ts`; the bootstrap only provides `{view, version, title}` and data is fetched from `/admin/api/*`.
 - Service worker is manually registered at `/public/dist/sw.js` with scope `/`; `frontend_cache.go` sets `Service-Worker-Allowed: /` only for that path.
 - Keep Go JSON response keys aligned with `web/src/types.ts`; TS is strict and only includes `web/**/*.ts` and `web/**/*.vue`.

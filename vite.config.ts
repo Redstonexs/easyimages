@@ -56,20 +56,6 @@ export default defineConfig({
                 statuses: [0, 200]
               }
             }
-          },
-          {
-            urlPattern: ({ url }) => url.pathname === '/api/list',
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'easyimage-gallery-api',
-              expiration: {
-                maxEntries: 80,
-                maxAgeSeconds: 60 * 60
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
           }
         ]
       }
@@ -82,7 +68,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         upload: 'web/src/entries/upload.ts',
-        gallery: 'web/src/entries/gallery.ts',
         admin: 'web/src/entries/admin.ts'
       }
     }

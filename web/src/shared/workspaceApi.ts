@@ -13,6 +13,7 @@ export interface WorkspaceUser {
 export interface WorkspaceFolder {
   owner_id: string
   path: string
+  browse_only?: boolean
 }
 
 export interface WorkspaceAsset {
@@ -25,6 +26,8 @@ export interface WorkspaceAsset {
   height?: number
   image_id?: string
   url: string
+  webp_url?: string
+  legacy?: boolean
 }
 
 export interface WorkspaceTransform {
@@ -65,12 +68,13 @@ export const workspaceApi = {
   createUser: (input: UserInput) => fetchJSON<WorkspaceUser>(`${base}/users`, json('POST', input)),
   updateUser: (id: string, input: { quota_bytes: number; disabled: boolean; password?: string }) =>
     fetchJSON<WorkspaceUser>(`${base}/users/${id}`, json('PATCH', input)),
-  folders: (owner: string) => fetchJSON<{ items: WorkspaceFolder[] }>(`${base}/folders?${ownerQuery(owner)}`),
+  folders: (owner: string) => fetchJSON<{ items: WorkspaceFolder[] }>(`${base}/folders?${ownerQuery(owner)}&include_legacy=true`),
   createFolder: (owner: string, path: string) =>
     fetchJSON<WorkspaceFolder>(`${base}/folders?${ownerQuery(owner)}`, json('POST', { path })),
   images: (owner: string, folder: string | null, cursor = '') => {
     const query = ownerQuery(owner)
     query.set('include_variants', 'true')
+    query.set('include_legacy', 'true')
     if (folder !== null) query.set('folder', folder)
     if (cursor) query.set('cursor', cursor)
     return fetchJSON<{ items: WorkspaceAsset[]; next_cursor: string }>(`${base}/images?${query}`)

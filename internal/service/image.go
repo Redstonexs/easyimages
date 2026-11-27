@@ -785,13 +785,9 @@ func GetWebPURL(originalPath string, cfg *config.Config) string {
 		return ""
 	}
 	webpFsPath := filepath.Join(storageRootForURLPath(cfg.Path), webpRelPath)
-
-	// 检查webp文件是否存在
-	if _, err := os.Stat(webpFsPath); err == nil {
-		webpURLPath := prefix + filepath.ToSlash(webpRelPath)
-		return cfg.Domain + webpURLPath
+	if info, err := os.Stat(webpFsPath); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+		return cfg.Domain + prefix + filepath.ToSlash(webpRelPath)
 	}
-
 	return ""
 }
 

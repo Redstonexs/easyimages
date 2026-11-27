@@ -206,7 +206,6 @@ func main() {
 
 	// 页面路由
 	r.GET("/", handler.Index(cfg))
-	r.GET("/app/list", handler.List(cfg))
 	r.GET("/app/info", handler.Info(cfg))
 	r.GET("/app/down", handler.Download(cfg))
 	r.GET("/app/thumb", handler.Thumbnail(cfg))
@@ -224,8 +223,6 @@ func main() {
 
 	// API路由
 	r.POST("/api/index", handler.APIUpload(cfg))
-	r.GET("/api/list", handler.ImageListAPI(cfg))
-	r.GET("/api/urllist", handler.ImageURLListAPI(cfg))
 	r.OPTIONS("/api/index", func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS")
@@ -244,7 +241,6 @@ func main() {
 		admin.GET("/chart", middleware.RequireAdmin(cfg), handler.Chart(cfg))
 		admin.GET("/history", middleware.RequireAdmin(cfg), handler.History(cfg))
 		admin.POST("/history", middleware.RequireAdmin(cfg), handler.HistoryDelete(cfg))
-		admin.GET("/urllist", middleware.RequireAdmin(cfg), handler.ImageURLList(cfg))
 		admin.GET("/filer", middleware.RequireAdmin(cfg), handler.Filer(cfg))
 		admin.POST("/del", middleware.RequireAdmin(cfg), handler.AdminDelete(cfg))
 
@@ -257,7 +253,6 @@ func main() {
 		api.GET("/chart", handler.AdminChartAPI(cfg))
 		api.GET("/history", handler.AdminHistoryAPI(cfg))
 		api.POST("/history/delete", handler.AdminHistoryDeleteAPI(cfg))
-		api.GET("/urllist", handler.AdminURLListAPI(cfg))
 		api.GET("/filer", handler.AdminFilerAPI(cfg))
 		api.POST("/delete", handler.AdminDeleteAPI(cfg))
 	}
@@ -288,44 +283,14 @@ func main() {
 	}
 }
 
-// checkAndMigrate 检测并执行自动迁移
+// checkAndMigrate 检测旧版 PHP 配置并自动转换为 Go JSON 配置，成功后删除旧 PHP 文件。
 func checkAndMigrate() error {
-	// 检查是否已有Go配置（非默认配置）
-	if config.HasInstalledOrCustomizedGoConfig() {
-		log.Println("Valid Go config exists, skipping migration")
-		return nil
+	migrated, err := config.AutoMigrate()
+	if err != nil {
+		return err
 	}
-
-	// 检查是否存在可迁移的PHP配置。仓库内置的默认PHP配置只作为示例，
-	// 不能触发自动迁移，否则全新安装会被安装锁跳过。
-	if !config.HasMigratablePHPConfig() {
-		log.Println("No migratable PHP config found, skipping migration")
-		return nil
+	if migrated {
+		log.Println("[Migrate] 已将旧版 PHP 配置迁移为 Go JSON 配置并清理原 PHP 文件")
 	}
-
-	log.Println("========================================")
-	log.Println("检测到PHP版本配置，开始自动迁移...")
-	log.Println("========================================")
-
-	// 备份PHP配置
-	if err := config.BackupPHPConfig(); err != nil {
-		log.Printf("Warning: failed to backup PHP config: %v", err)
-	}
-
-	// 迁移数据目录
-	if err := config.MigratePHPData(); err != nil {
-		return fmt.Errorf("failed to migrate PHP data: %w", err)
-	}
-
-	// 执行自动迁移
-	if err := config.AutoMigrate(); err != nil {
-		return fmt.Errorf("failed to auto migrate: %w", err)
-	}
-
-	log.Println("========================================")
-	log.Println("自动迁移完成！")
-	log.Println("PHP配置已备份到 config/php_backup/ 目录")
-	log.Println("========================================")
-
 	return nil
 }

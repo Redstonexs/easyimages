@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -113,16 +112,6 @@ type adminFileEntry struct {
 	Size         int64  `json:"size,omitempty"`
 	SizeHuman    string `json:"size_human,omitempty"`
 	ModifiedAt   string `json:"modified_at,omitempty"`
-}
-
-type adminURLListData struct {
-	Path       string           `json:"path"`
-	Query      string           `json:"q"`
-	Page       int              `json:"page"`
-	PageSize   int              `json:"page_size"`
-	Total      int              `json:"total"`
-	TotalPages int              `json:"total_pages"`
-	Files      []adminFileEntry `json:"files"`
 }
 
 type adminFilerData struct {
@@ -315,18 +304,6 @@ func AdminHistoryDeleteAPI(cfg *config.Config) gin.HandlerFunc {
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "无效操作"})
 		}
-	}
-}
-
-func AdminURLListAPI(cfg *config.Config) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		payload, err := adminURLListPayload(c, cfg)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.Header("Cache-Control", "private, max-age=30, stale-while-revalidate=120")
-		c.JSON(http.StatusOK, payload)
 	}
 }
 
@@ -652,109 +629,6 @@ func adminHistoryPayload(c *gin.Context, cfg *config.Config) (imageListPayloadDa
 	return imageListPayload(c, cfg)
 }
 
-func adminURLListPayload(c *gin.Context, cfg *config.Config) (adminURLListData, error) {
-	reqPath, err := adminRequestPath(c, cfg)
-	if err != nil {
-		return adminURLListData{}, err
-	}
-	page := parseBoundedInt(c.DefaultQuery("page", "1"), 1, 1, 100000)
-	pageSize := parseBoundedInt(c.DefaultQuery("page_size", "50"), 50, 1, 200)
-	query := strings.TrimSpace(c.Query("q"))
-	if query != "" && !isSafeListQuery(query) {
-		return adminURLListData{}, fmt.Errorf("invalid search parameter")
-	}
-
-	rawFiles := service.GetFileListRecursive("." + reqPath)
-	localNames := make([]string, 0, len(rawFiles))
-	seen := make(map[string]bool, len(rawFiles))
-	for _, name := range rawFiles {
-		if strings.HasPrefix(name, "webp/") || !service.IsImageFile(name) {
-			continue
-		}
-		relativePath := reqPath + name
-		if query != "" {
-			metadata, _ := service.GetImageMetadata(relativePath)
-			if !adminFileMatchesQuery(name, relativePath, metadata, query) {
-				continue
-			}
-		}
-		seen[relativePath] = true
-		localNames = append(localNames, name)
-	}
-
-	var s3Entries []adminFileEntry
-	if reqPath == cfg.Path {
-		s3Entries = adminURLListMetadataEntries(cfg, query, seen)
-	}
-
-	total := len(localNames) + len(s3Entries)
-	totalPages := (total + pageSize - 1) / pageSize
-	start := (page - 1) * pageSize
-	end := start + pageSize
-	if start > total {
-		start = total
-	}
-	if end > total {
-		end = total
-	}
-
-	// 只对当前页需要返回的条目执行 os.Stat、WebP 检查和元数据拼装，避免分页前全量 IO。
-	pageFiles := make([]adminFileEntry, 0, end-start)
-	localCount := len(localNames)
-	if start < localCount {
-		localEnd := min(end, localCount)
-		pageFiles = append(pageFiles, adminFileEntries(reqPath, localNames[start:localEnd], cfg)...)
-	}
-	if end > localCount {
-		s3Start := max(0, start-localCount)
-		s3End := end - localCount
-		pageFiles = append(pageFiles, s3Entries[s3Start:s3End]...)
-	}
-
-	return adminURLListData{
-		Path:       reqPath,
-		Query:      query,
-		Page:       page,
-		PageSize:   pageSize,
-		Total:      total,
-		TotalPages: totalPages,
-		Files:      pageFiles,
-	}, nil
-}
-
-func adminURLListMetadataEntries(cfg *config.Config, query string, seen map[string]bool) []adminFileEntry {
-	allFiles := make([]adminFileEntry, 0)
-	for i := 0; i < cfg.ListDate; i++ {
-		datePath := time.Now().AddDate(0, 0, -i).Format("2006/01/02/")
-		for _, metadata := range service.ListImageMetadataForDate(datePath, cfg.ShowSort == 1) {
-			if metadata.StorageType != "s3" || seen[metadata.Path] {
-				continue
-			}
-			if query != "" && !adminFileMatchesQuery(metadata.StoredName, metadata.Path, metadata, query) {
-				continue
-			}
-			name := metadata.StoredName
-			if name == "" {
-				name = filepath.Base(metadata.Path)
-			}
-			allFiles = append(allFiles, adminFileEntry{
-				Name: name, OriginalName: metadata.OriginalName, Path: metadata.Path,
-				URL: imageURLForMetadata(cfg, metadata.Path, metadata), ThumbURL: thumbURLForMetadata(metadata.Path, metadata),
-				Ext: strings.TrimPrefix(strings.ToUpper(filepath.Ext(name)), "."), Size: metadata.Size, SizeHuman: service.FormatSize(metadata.Size), ModifiedAt: metadata.UploadedAt,
-			})
-		}
-	}
-	return allFiles
-}
-
-func adminFileMatchesQuery(name, relativePath string, metadata service.ImageMetadata, query string) bool {
-	query = strings.ToLower(strings.TrimSpace(query))
-	if query == "" {
-		return true
-	}
-	return service.MetadataMatchesQuery(metadata, name, query) || strings.Contains(strings.ToLower(relativePath), query)
-}
-
 func adminFilerPayload(c *gin.Context, cfg *config.Config) (adminFilerData, error) {
 	reqPath, err := adminRequestPath(c, cfg)
 	if err != nil {
@@ -828,14 +702,6 @@ func adminFileEntries(basePath string, names []string, cfg *config.Config) []adm
 		})
 	}
 	return files
-}
-
-func parseBoundedInt(value string, fallback, min, max int) int {
-	n, err := strconv.Atoi(value)
-	if err != nil || n < min || n > max {
-		return fallback
-	}
-	return n
 }
 
 func adminShellData(c *gin.Context, cfg *config.Config, view string) gin.H {

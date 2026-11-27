@@ -62,13 +62,8 @@ COPY --from=builder /build/easyimage .
 COPY --from=builder /build/public ./public
 COPY --from=builder /build/templates ./templates
 
-# 复制PHP配置文件（用于自动迁移）
-COPY --from=builder /build/config/config.php ./config/config.php
-COPY --from=builder /build/config/config.guest.php ./config/config.guest.php
-COPY --from=builder /build/config/api_key.php ./config/api_key.php
-
-# 创建必要目录
-RUN mkdir -p /app/i/cache /app/i/suspic /app/i/recycle && \
+# 创建必要目录（挂载旧版 PHP config/*.php 到 /app/config 时会在启动时自动迁移并清理）
+RUN mkdir -p /app/config /app/i/cache /app/i/suspic /app/i/recycle && \
     mkdir -p /app/admin/logs/upload /app/admin/logs/ipcounts
 
 # 设置权限

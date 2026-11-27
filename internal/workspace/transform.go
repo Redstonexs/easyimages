@@ -38,6 +38,28 @@ const (
 	maxSourceBytes        = 32 << 20
 )
 
+var maxTransformWebPQuery = fmt.Sprintf("?format=webp&width=%d&height=%d", maxTransformDimension, maxTransformDimension)
+
+// WebPConversionQuery builds a link within the renderer's input and output limits.
+func WebPConversionQuery(asset Asset) string {
+	// GIF conversion decodes one frame. Keep the original animation for quick copies.
+	switch asset.ContentType {
+	case "image/jpeg", "image/png", "image/bmp":
+	default:
+		return ""
+	}
+	if asset.SizeBytes > maxSourceBytes || asset.Width <= 0 || asset.Height <= 0 || asset.Width > maxSourcePixels/asset.Height {
+		return ""
+	}
+	if _, err := lookupWorkspaceCwebp(); err != nil {
+		return ""
+	}
+	if max(asset.Width, asset.Height) > maxTransformDimension {
+		return maxTransformWebPQuery
+	}
+	return "?format=webp"
+}
+
 type TransformOptions struct {
 	Width   int     `json:"width,omitempty"`
 	Height  int     `json:"height,omitempty"`

@@ -109,6 +109,8 @@ $.ajax({
 
 管理员在「图片库 → 租户与链接」创建账号、设置存储配额和公开链接格式。租户使用同一登录页，登录后进入自己的图片库。管理员可通过「查看账号」管理任意租户的目录和图片。
 
+管理员可在自己的图片库查看旧目录和旧图。API 客户端可向 `GET /api/v1/folders` 和 `GET /api/v1/images` 传入 `include_legacy=true`。旧图带有 `legacy: true`，沿用原直链，在图片库中可查看和复制链接。响应中的 `webp_url` 指向已有的 WebP 或可用的动态转换链接。
+
 在图片库的「API 访问」生成令牌后，通过 `Authorization: Bearer <token>` 调用接口。令牌按账号授权，重新生成会替换之前的令牌。自动化工具可读取 `/api/v1/openapi.json` 或 `/api/v1/openapi.yaml`，再调用 `getCurrentUser` 验证身份。错误采用 RFC 9457 的 `application/problem+json`，可用 `code` 判断具体原因。配额不足会返回 HTTP 409 和 `quota_exceeded`，同时带上配额和用量。请求大小已知时也会返回 `requested_bytes`。
 
 ### 上传原图

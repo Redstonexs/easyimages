@@ -328,6 +328,9 @@ type ImageFilter struct {
 	Cursor          string
 	Limit           int
 	IncludeVariants bool
+	// Legacy is a read-only inventory for the administrator's own library.
+	// A nil slice keeps the workspace-only view.
+	Legacy []Asset
 }
 
 func (s *Store) Images(actor Identity, filter ImageFilter) ([]Asset, string, error) {
@@ -341,24 +344,35 @@ func (s *Store) Images(actor Identity, filter ImageFilter) ([]Asset, string, err
 
 	s.mu.RLock()
 	ownerID, err := s.ownerLocked(actor, filter.OwnerID)
+	includeLegacy := filter.Legacy != nil && actor.IsAdmin() && ownerID == AdminID
 	if err == nil && filter.Folder != nil && !ValidFolderPath(*filter.Folder) {
-		err = ValidationError("folder must be a relative path")
+		if !includeLegacy || *filter.Folder == "." || !fs.ValidPath(*filter.Folder) {
+			err = ValidationError("folder must be a relative path")
+		}
 	}
 	if err != nil {
 		s.mu.RUnlock()
 		return nil, "", err
 	}
 	items := make([]Asset, 0)
-	for _, asset := range s.catalog.Assets {
+	add := func(asset Asset) {
 		if asset.Deleted || (!filter.IncludeVariants && asset.ImageID != "") || asset.OwnerID != ownerID ||
 			(filter.Folder != nil && asset.Folder != *filter.Folder) {
-			continue
+			return
 		}
 		if after.ID == "" || assetOrder(asset, after) > 0 {
 			items = append(items, asset)
 		}
 	}
+	for _, asset := range s.catalog.Assets {
+		add(asset)
+	}
 	s.mu.RUnlock()
+	if includeLegacy {
+		for _, asset := range filter.Legacy {
+			add(asset)
+		}
+	}
 
 	slices.SortFunc(items, assetOrder)
 	if len(items) <= filter.Limit {

@@ -10,7 +10,6 @@ import {
   ExternalLink,
   FolderOpen,
   History,
-  Images,
   Loader2,
   LogIn,
   RefreshCw,
@@ -738,12 +737,6 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
         brandHref="/"
         right={(
           <nav className="flex items-center gap-1" aria-label="主导航">
-            <Button variant="ghost" size="sm" asChild>
-              <a href="/app/list">
-                <Images className="size-4" />
-                <span className="hidden sm:inline">图床广场</span>
-              </a>
-            </Button>
             {bootstrap.is_admin && (
               <>
                 <Button variant="ghost" size="sm" asChild>

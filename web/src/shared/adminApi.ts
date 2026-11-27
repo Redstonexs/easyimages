@@ -1,4 +1,4 @@
-import type { AdminChart, AdminConfig, AdminFiler, AdminOverview, AdminURLList, GalleryBootstrap } from '../types'
+import type { AdminChart, AdminConfig, AdminFiler, AdminOverview, GalleryBootstrap } from '../types'
 import { fetchJSON } from './api'
 
 export const adminApi = {
@@ -21,7 +21,6 @@ export const adminApi = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url, mode })
   }),
-  urlList: (params: URLSearchParams, init?: RequestInit) => fetchJSON<AdminURLList>(`/admin/api/urllist?${params.toString()}`, init),
   filer: (params: URLSearchParams, init?: RequestInit) => fetchJSON<AdminFiler>(`/admin/api/filer?${params.toString()}`, init),
   deleteFile: (url: string, mode = 'delete') => fetchJSON<{ code: number; msg: string }>('/admin/api/delete', {
     method: 'POST',

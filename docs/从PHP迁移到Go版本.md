@@ -36,28 +36,13 @@ docker-compose logs -f
 
 启动时会执行：
 
-1. 检测可迁移的 PHP 配置。
-2. 备份 PHP 配置到 `config/php_backup/`。
-3. 解析 PHP 数组配置。
-4. 生成 `config/config.json`、`config/config.guest.json`、`config/api_key.json`。
-5. 创建 `config/install.lock`。
-6. 确保 `i/` 和 `admin/logs/` 运行目录存在。
+1. 检测 `config/` 目录下是否存在旧版 `config.php`、`api_key.php`、`config.guest.php`（若已存在已安装的 `config/config.json` 或 `config/install.lock` 则跳过）。
+2. 解析 PHP 数组配置（支持多行与嵌套数组语法）。
+3. 原子写入 `config/config.json`、`config/api_key.json` 并创建 `config/install.lock`。
+4. 全部写入成功后，自动删除已迁移的 `config/*.php` 文件（若解析或写入失败，原 `.php` 文件保持不动）。
+5. 确保 `i/` 和 `admin/logs/` 运行目录存在。
 
-仓库内置的默认 `config/*.php` 只作为迁移模板，不会触发自动迁移。只有复制了真实旧站点配置后才会自动迁移。
-
-## 手动转换
-
-自动迁移失败时，可以先手动转换主配置：
-
-```bash
-go run ./cmd/php2json config/config.php config/config.json
-```
-
-检查迁移状态：
-
-```bash
-go run ./cmd/migrate_test
-```
+> 说明：旧版 `config/config.guest.php` 的上传者账号已由 Go 版本的多用户工作区账号取代；若目录中存在该文件，迁移时会打印提示并将其清理。
 
 ## 兼容范围
 
@@ -66,8 +51,7 @@ go run ./cmd/migrate_test
 - 图片目录：`/i/YYYY/MM/DD/file.ext`
 - 缩略图缓存、回收站、可疑图片目录
 - 管理员用户名和旧 SHA256 密码哈希
-- 上传者配置：`config/config.guest.php`
-- API token 配置：`config/api_key.php`
+- API token 配置：`config/api_key.php` → `config/api_key.json`
 - 主要上传限制、图片处理和安全配置项
 
 当前 Go 路由：
@@ -134,14 +118,13 @@ http://your-domain.com/i/2024/01/01/xxx.jpg
 
 ## 回滚
 
-如果需要回滚到 PHP 版本：
+如果需要回滚到 PHP 版本，使用迁移前备份的 `config_backup/` 恢复即可：
 
 ```bash
 pkill easyimage
-cp config/php_backup/config.php config/
-cp config/php_backup/config.guest.php config/
-cp config/php_backup/api_key.php config/
-rm config/config.json config/config.guest.json config/api_key.json config/install.lock
+cp config_backup/config.php config/
+cp config_backup/api_key.php config/
+rm -f config/config.json config/api_key.json config/install.lock
 ```
 
 然后按旧 Web 服务器配置重新启动 PHP 版本。
@@ -150,7 +133,7 @@ rm config/config.json config/config.guest.json config/api_key.json config/instal
 
 ### 自动迁移没有触发
 
-确认复制的是旧站点真实 `config/*.php`，不是仓库内置默认模板；同时确认不存在已安装的 `config/config.json` 和 `config/install.lock`。
+确认 `config/` 目录下存在 `config.php`（或 `api_key.php`），同时不存在已安装的 `config/config.json` 和 `config/install.lock`。
 
 ### API 调用失败
 

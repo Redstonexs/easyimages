@@ -33,9 +33,9 @@ i/*
 config/config.json
 config/config.guest.json
 config/api_key.json
+config/*.php
 config/install.lock
 config/EasyImage.lock
-config/php_backup
 config/workspace
 
 # Temporary files

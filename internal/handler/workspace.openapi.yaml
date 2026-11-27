@@ -5,7 +5,7 @@ info:
   description: |
     Manage users, folders, original images, and saved variants. Start with getCurrentUser
     to confirm the account associated with a Bearer token. Uploads require a multipart
-    file. Image delivery URLs are public and contain opaque IDs.
+    file. New workspace image delivery URLs are public and contain opaque IDs.
 servers:
   - url: /
 security:
@@ -129,6 +129,8 @@ paths:
       operationId: listFolders
       summary: List folders in a workspace
       description: The root folder is implied and is represented by an empty string.
+      parameters:
+        - $ref: '#/components/parameters/IncludeLegacy'
       responses:
         '200':
           description: Folders sorted by path
@@ -170,6 +172,7 @@ paths:
       summary: List images in a workspace
       description: Lists originals by default, sorted from newest to oldest. Pass next_cursor as cursor to fetch more images.
       parameters:
+        - $ref: '#/components/parameters/IncludeLegacy'
         - name: folder
           in: query
           allowEmptyValue: true
@@ -204,7 +207,7 @@ paths:
     post:
       operationId: uploadOriginalImage
       summary: Upload an original image into a folder
-      description: Preserves the bytes of the original. Send one supported image file within the server's upload limit and the account's quota.
+      description: Preserves the bytes of the original. Send one supported image file within the server's upload limit and the account's quota. Administrators can select an existing legacy folder in their own workspace.
       requestBody:
         required: true
         content:
@@ -239,6 +242,7 @@ paths:
     get:
       operationId: getImage
       summary: Get an original and its saved variants
+      description: Administrators can also look up legacy IDs returned by listImages. Legacy entries retain their original URLs and support read-only access through this API.
       responses:
         '200':
           description: Image details
@@ -386,6 +390,11 @@ components:
       in: query
       schema: { type: string }
       description: Target workspace ID. Defaults to the authenticated account. Only administrators can select another account.
+    IncludeLegacy:
+      name: include_legacy
+      in: query
+      schema: { type: boolean, default: false }
+      description: Include legacy images or folders when listing the administrator's own workspace. Has no effect on tenant workspaces.
     ImageID:
       name: image_id
       in: path
@@ -443,6 +452,7 @@ components:
         owner_id: { type: string }
         path: { type: string, example: projects/summer }
         created_at: { type: string, format: date-time }
+        browse_only: { type: boolean, description: The legacy folder name can be used for browsing only. }
     Asset:
       type: object
       required: [id, owner_id, folder, filename, content_type, size_bytes, created_at, url]
@@ -457,6 +467,8 @@ components:
         height: { type: integer, minimum: 1 }
         created_at: { type: string, format: date-time }
         url: { type: string, format: uri, description: Public delivery URL }
+        webp_url: { type: string, format: uri, description: Public WebP URL when a stored or dynamically generated rendition is available. }
+        legacy: { type: boolean, description: The image retains its legacy delivery URL and is read-only through the workspace API. }
         image_id:
           $ref: '#/components/schemas/AssetID'
           description: Present on variants. Identifies their original.

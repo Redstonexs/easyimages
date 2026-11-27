@@ -153,7 +153,7 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
 
   function selectFolder(path: string | null) {
     setFolderFilter(path)
-    setUploadFolder(path || '')
+    setUploadFolder(path && !folders.some(folder => folder.path === path && folder.browse_only) ? path : '')
   }
 
   function selectImage(asset: WorkspaceAsset) {
@@ -393,7 +393,6 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                   <CardTitle className="text-base">
                     {folderFilter === null ? '全部图片' : folderFilter || '根目录'}
                   </CardTitle>
-                  <CardDescription>点击列表中的图片可查看详情、动态转换链接与预生成版本。</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <form onSubmit={upload} className="grid gap-3 rounded-lg border bg-muted/30 p-3 sm:grid-cols-[160px_1fr_auto] sm:items-end">
@@ -409,7 +408,7 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value={ROOT_SENTINEL}>根目录</SelectItem>
-                          {folders.map(folder => (
+                          {folders.filter(folder => !folder.browse_only).map(folder => (
                             <SelectItem key={folder.path} value={folder.path}>{folder.path}</SelectItem>
                           ))}
                         </SelectContent>
@@ -450,6 +449,7 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                       {images.map(image => {
                         const originalID = image.image_id || image.id
                         const isSelected = selected === originalID
+                        const webpURL = image.webp_url
                         return (
                           <li
                             key={image.id}
@@ -468,17 +468,27 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                               </button>
                               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                                 <Badge variant={image.image_id ? 'outline' : 'secondary'} className="text-[10px] py-0">
-                                  {image.image_id ? '预生成版本' : '原图'}
+                                  {image.legacy ? '旧图' : image.image_id ? '预生成版本' : '原图'}
                                 </Badge>
                                 <span className="font-mono">{image.folder || '根目录'}</span>
                                 <span>·</span>
                                 <span className="font-mono tabular-nums">{formatSize(image.size_bytes)}</span>
                               </div>
                             </div>
-                            <Button type="button" size="xs" variant="outline" onClick={() => void copy(image.url)}>
-                              <Copy className="size-3" />
-                              复制链接
-                            </Button>
+                            <div className="flex flex-wrap gap-2">
+                              {webpURL !== image.url && (
+                                <Button type="button" size="xs" variant="outline" onClick={() => void copy(image.url)}>
+                                  <Copy className="size-3" />
+                                  复制链接
+                                </Button>
+                              )}
+                              {webpURL && (
+                                <Button type="button" size="xs" variant="outline" onClick={() => void copy(new URL(webpURL, window.location.href).href, '已复制 WebP 链接')}>
+                                  <Copy className="size-3" />
+                                  复制 WebP
+                                </Button>
+                              )}
+                            </div>
                           </li>
                         )
                       })}

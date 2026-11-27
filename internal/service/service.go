@@ -472,9 +472,9 @@ var internalDirs = map[string]bool{
 	"webp":    true,
 }
 
-// isInternalPath 检查路径的顶层目录是否为系统内部目录。
+// IsInternalStoragePath 检查路径的顶层目录是否为系统内部目录。
 // 例如 "cache/thumb_xxx" → true, "2026/05/08/file.jpg" → false
-func isInternalPath(relPath string) bool {
+func IsInternalStoragePath(relPath string) bool {
 	if internalDirs[relPath] {
 		return true
 	}
@@ -556,31 +556,6 @@ func CountFilesByExt(dir, ext string) int {
 	return count
 }
 
-// GetFileListRecursive 递归获取目录下所有文件的相对路径（跳过系统内部目录）
-func GetFileListRecursive(dir string) []string {
-	var files []string
-	cleanDir := filepath.Clean(dir)
-	_ = filepath.WalkDir(cleanDir, func(entryPath string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if entryPath != cleanDir && internalDirs[d.Name()] {
-				rel, relErr := filepath.Rel(cleanDir, entryPath)
-				if relErr == nil && isInternalPath(filepath.ToSlash(rel)) {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		if rel, relErr := filepath.Rel(cleanDir, entryPath); relErr == nil {
-			files = append(files, filepath.ToSlash(rel))
-		}
-		return nil
-	})
-	return files
-}
-
 // imageExts 图片文件扩展名集合（包级变量，避免每次调用 IsImageFile 都分配新 map）
 var imageExts = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
@@ -640,7 +615,7 @@ func CollectDirStats(dir string) DirStats {
 		if d.IsDir() {
 			if entryPath != cleanDir && internalDirs[d.Name()] {
 				rel, relErr := filepath.Rel(cleanDir, entryPath)
-				if relErr == nil && isInternalPath(filepath.ToSlash(rel)) {
+				if relErr == nil && IsInternalStoragePath(filepath.ToSlash(rel)) {
 					return filepath.SkipDir
 				}
 			}

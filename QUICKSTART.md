@@ -54,7 +54,6 @@ docker-compose logs -f
 
 ```bash
 cp /path/to/php/config/config.php config/
-cp /path/to/php/config/config.guest.php config/
 cp /path/to/php/config/api_key.php config/
 npm ci
 npm run build
@@ -62,19 +61,7 @@ go build -o easyimage .
 ./easyimage
 ```
 
-自动迁移会生成 Go JSON 配置，并将 PHP 配置备份到 `config/php_backup/`。
-
-如果需要手动转换主配置：
-
-```bash
-go run ./cmd/php2json config/config.php config/config.json
-```
-
-检查迁移状态：
-
-```bash
-go run ./cmd/migrate_test
-```
+启动时会自动将 `config/*.php` 转换为 Go JSON 配置并写入 `config/install.lock`，迁移成功后自动清理原 `.php` 文件（如解析失败会保留原文件）。
 
 完整迁移说明见 [docs/从PHP迁移到Go版本.md](docs/从PHP迁移到Go版本.md)。
 

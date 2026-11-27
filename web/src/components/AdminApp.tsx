@@ -5,8 +5,6 @@ import {
   FolderOpen,
   History,
   Home,
-  Images,
-  Link2,
   LogOut,
   Settings
 } from 'lucide-react'
@@ -21,14 +19,12 @@ import AdminChart from '@/components/admin/AdminChart'
 import AdminConfig from '@/components/admin/AdminConfig'
 import AdminFiler from '@/components/admin/AdminFiler'
 import AdminHistory from '@/components/admin/AdminHistory'
-import AdminUrlList from '@/components/admin/AdminUrlList'
 import WorkspaceLibrary from '@/components/admin/WorkspaceLibrary'
 
 const NAV_ITEMS: Array<{ view: AdminView; label: string; href: string; icon: typeof Settings }> = [
   { view: 'manager', label: '系统配置', href: '/admin/manager', icon: Settings },
   { view: 'workspace', label: '图片库', href: '/admin/workspace', icon: FolderOpen },
   { view: 'history', label: '历史上传', href: '/admin/history', icon: History },
-  { view: 'urllist', label: '图片列表', href: '/admin/urllist', icon: Link2 },
   { view: 'chart', label: '数据统计', href: '/admin/chart', icon: BarChart3 },
   { view: 'filer', label: '文件管理', href: '/admin/filer', icon: FolderKanban }
 ]
@@ -79,17 +75,11 @@ export default function AdminApp({ bootstrap }: { bootstrap: AdminBootstrap }) {
         subtitle={`v${bootstrap.version}`}
         right={(
           <div className="flex items-center gap-1.5">
-            <Button variant="ghost" size="sm" asChild>
-              <a href={bootstrap.is_admin ? '/' : '/app/list'}>
-                {bootstrap.is_admin ? <Home className="size-4" /> : <Images className="size-4" />}
-                <span className="hidden sm:inline">{bootstrap.is_admin ? '上传首页' : '图床广场'}</span>
-              </a>
-            </Button>
             {bootstrap.is_admin && (
               <Button variant="ghost" size="sm" asChild>
-                <a href="/app/list">
-                  <Images className="size-4" />
-                  <span className="hidden md:inline">广场</span>
+                <a href="/">
+                  <Home className="size-4" />
+                  <span className="hidden sm:inline">上传首页</span>
                 </a>
               </Button>
             )}
@@ -151,7 +141,6 @@ export default function AdminApp({ bootstrap }: { bootstrap: AdminBootstrap }) {
             <AdminConfig onNotice={notifyToast} onDirtyChange={setConfigDirty} />
           )}
           {currentView === 'history' && <AdminHistory onNotice={notifyToast} />}
-          {currentView === 'urllist' && <AdminUrlList onNotice={notifyToast} />}
           {currentView === 'chart' && <AdminChart onNotice={notifyToast} />}
           {currentView === 'filer' && <AdminFiler onNotice={notifyToast} />}
           {currentView === 'workspace' && (

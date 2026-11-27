@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestImageListPayloadBuildsFrontendGalleryData(t *testing.T) {
+func TestImageListPayloadBuildsHistoryData(t *testing.T) {
 	tmp := t.TempDir()
 	oldWd, err := os.Getwd()
 	if err != nil {
@@ -39,7 +39,7 @@ func TestImageListPayloadBuildsFrontendGalleryData(t *testing.T) {
 		}
 	}
 
-	req := httptest.NewRequest("GET", "/api/list?date="+date+"&search=jpg", nil)
+	req := httptest.NewRequest("GET", "/admin/api/history?date="+date+"&search=jpg", nil)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = req
 
@@ -105,7 +105,7 @@ func TestImageListPayloadSearchesOriginalFileName(t *testing.T) {
 	}
 	service.SaveImageMetadata("/i/"+date+"abc123.jpg", "Holiday Beach.JPG", 1, "web", now)
 
-	req := httptest.NewRequest("GET", "/api/list?date="+date+"&q=beach", nil)
+	req := httptest.NewRequest("GET", "/admin/api/history?date="+date+"&q=beach", nil)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = req
 
@@ -162,7 +162,7 @@ func TestImageListPayloadIncludesOriginalNameWithoutQuery(t *testing.T) {
 	}
 	service.SaveImageMetadata("/i/"+date+"stored.jpg", "源文件名.jpg", 1, "web", now)
 
-	req := httptest.NewRequest("GET", "/api/list?date="+date, nil)
+	req := httptest.NewRequest("GET", "/admin/api/history?date="+date, nil)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = req
 
@@ -213,7 +213,7 @@ func TestImageListPayloadSupportsExtAndQueryTogether(t *testing.T) {
 	service.SaveImageMetadata("/i/"+date+"match.jpg", "Conference Badge.JPG", 1, "web", now)
 	service.SaveImageMetadata("/i/"+date+"match.png", "Conference Badge.PNG", 1, "web", now)
 
-	req := httptest.NewRequest("GET", "/api/list?date="+date+"&ext=jpg&q=conference", nil)
+	req := httptest.NewRequest("GET", "/admin/api/history?date="+date+"&ext=jpg&q=conference", nil)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = req
 
@@ -239,7 +239,7 @@ func TestImageListPayloadSupportsExtAndQueryTogether(t *testing.T) {
 }
 
 func TestImageListPayloadRejectsUnsafeSearch(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/list?q=../jpg", nil)
+	req := httptest.NewRequest("GET", "/admin/api/history?q=../jpg", nil)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = req
 
@@ -250,7 +250,7 @@ func TestImageListPayloadRejectsUnsafeSearch(t *testing.T) {
 }
 
 func TestImageListPayloadRejectsUnsafeDate(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/list?date=../", nil)
+	req := httptest.NewRequest("GET", "/admin/api/history?date=../", nil)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = req
 

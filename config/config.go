@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -170,12 +171,6 @@ type StorageSourceConfig struct {
 	S3ForcePathStyle  bool   `json:"s3_force_path_style"`
 }
 
-type GuestConfig struct {
-	Password string `json:"password"`
-	Expired  int64  `json:"expired"`
-	AddTime  int64  `json:"add_time"`
-}
-
 type APIKey struct {
 	ID      int   `json:"id"`
 	Expired int64 `json:"expired"`
@@ -184,7 +179,6 @@ type APIKey struct {
 
 var (
 	currentConfig *Config
-	guestConfig   map[string]*GuestConfig
 	apiKeys       map[string]*APIKey
 	configMu      sync.RWMutex
 )
@@ -255,53 +249,13 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-	return os.WriteFile("config/config.json", data, 0644)
+	return writeFileAtomic("config/config.json", data, 0644)
 }
 
 func Get() *Config {
 	configMu.RLock()
 	defer configMu.RUnlock()
 	return currentConfig
-}
-
-func LoadGuestConfig() (map[string]*GuestConfig, error) {
-	configMu.RLock()
-	if guestConfig != nil {
-		defer configMu.RUnlock()
-		return guestConfig, nil
-	}
-	configMu.RUnlock()
-
-	configMu.Lock()
-	defer configMu.Unlock()
-
-	if guestConfig != nil {
-		return guestConfig, nil
-	}
-
-	guestConfig = make(map[string]*GuestConfig)
-	data, err := os.ReadFile("config/config.guest.json")
-	if err != nil {
-		if os.IsNotExist(err) {
-			return guestConfig, nil
-		}
-		return nil, err
-	}
-	if err := json.Unmarshal(data, &guestConfig); err != nil {
-		return nil, err
-	}
-	return guestConfig, nil
-}
-
-func SaveGuestConfig(gc map[string]*GuestConfig) error {
-	data, err := json.MarshalIndent(gc, "", "  ")
-	if err != nil {
-		return err
-	}
-	configMu.Lock()
-	guestConfig = gc
-	configMu.Unlock()
-	return os.WriteFile("config/config.guest.json", data, 0644)
 }
 
 func LoadAPIKeys() (map[string]*APIKey, error) {
@@ -338,10 +292,44 @@ func SaveAPIKeys(ak map[string]*APIKey) error {
 	if err != nil {
 		return err
 	}
+	if err := writeFileAtomic("config/api_key.json", data, 0644); err != nil {
+		return err
+	}
 	configMu.Lock()
 	apiKeys = ak
 	configMu.Unlock()
-	return os.WriteFile("config/api_key.json", data, 0644)
+	return nil
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 func setDefaults(cfg *Config) {
@@ -534,7 +522,6 @@ func getDefaultConfig() *Config {
 		ChartOn:              1,
 		ImageRecycle:         1,
 		Timezone:             "Asia/Shanghai",
-		LoginBg:              "../app/bing.php",
 		HideKey:              "EasyImage2.0",
 		AdminPath:            "u",
 		DefaultStorageSource: "local",

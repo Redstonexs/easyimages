@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -245,8 +246,25 @@ func (h workspaceHTTP) revokeToken(c *gin.Context, actor workspace.Identity) err
 }
 
 func (h workspaceHTTP) folders(c *gin.Context, actor workspace.Identity) error {
-	items, err := h.store.Folders(actor, c.Query("owner_id"))
-	return workspaceJSON(c, http.StatusOK, gin.H{"items": items}, err)
+	owner := c.Query("owner_id")
+	withLegacy, err := includeLegacy(c, actor, owner)
+	if err != nil {
+		return err
+	}
+	items, err := h.store.Folders(actor, owner)
+	if err != nil || !withLegacy {
+		return workspaceJSON(c, http.StatusOK, gin.H{"items": items}, err)
+	}
+	folders := readLegacyFolders(h.cfg)
+	for _, folder := range items {
+		folders[folder.Path] = workspaceFolder{Folder: folder}
+	}
+	out := make([]workspaceFolder, 0, len(folders))
+	for _, folder := range folders {
+		out = append(out, folder)
+	}
+	slices.SortFunc(out, func(a, b workspaceFolder) int { return strings.Compare(a.Path, b.Path) })
+	return workspaceJSON(c, http.StatusOK, gin.H{"items": out}, nil)
 }
 
 func (h workspaceHTTP) createFolder(c *gin.Context, actor workspace.Identity) error {
@@ -297,11 +315,19 @@ func (h workspaceHTTP) updateSettings(c *gin.Context, actor workspace.Identity) 
 
 type workspaceAsset struct {
 	workspace.Asset
-	URL string `json:"url"`
+	URL     string `json:"url"`
+	WebPURL string `json:"webp_url,omitempty"`
+	Legacy  bool   `json:"legacy,omitempty"`
 }
 
 func (settings deliverySettings) asset(item workspace.Asset) workspaceAsset {
-	return workspaceAsset{Asset: item, URL: settings.EffectiveOrigin + settings.PublicPrefix + "/" + item.ID}
+	out := workspaceAsset{Asset: item, URL: settings.EffectiveOrigin + settings.PublicPrefix + "/" + item.ID}
+	if item.ContentType == "image/webp" {
+		out.WebPURL = out.URL
+	} else if query := workspace.WebPConversionQuery(item); query != "" {
+		out.WebPURL = out.URL + query
+	}
+	return out
 }
 
 func (settings deliverySettings) assets(items []workspace.Asset) []workspaceAsset {
@@ -324,19 +350,58 @@ func (h workspaceHTTP) images(c *gin.Context, actor workspace.Identity) error {
 	if path, ok := c.GetQuery("folder"); ok {
 		filter.Folder = &path
 	}
-	if raw, ok := c.GetQuery("include_variants"); ok {
-		var err error
-		filter.IncludeVariants, err = strconv.ParseBool(raw)
-		if err != nil {
-			return workspace.ValidationError("include_variants must be true or false")
+	var err error
+	filter.IncludeVariants, err = workspaceQueryBool(c, "include_variants")
+	if err != nil {
+		return err
+	}
+	withLegacy, err := includeLegacy(c, actor, filter.OwnerID)
+	if err != nil {
+		return err
+	}
+	var legacy map[string]workspaceAsset
+	if withLegacy && filter.Limit >= 1 && filter.Limit <= 100 {
+		legacy = readLegacyImages(h.cfg, filter.Folder)
+		filter.Legacy = make([]workspace.Asset, 0, len(legacy))
+		for _, item := range legacy {
+			filter.Legacy = append(filter.Legacy, item.Asset)
 		}
 	}
 	items, cursor, err := h.store.Images(actor, filter)
-	return workspaceJSON(c, http.StatusOK, gin.H{"items": h.deliverySettings().assets(items), "next_cursor": cursor}, err)
+	if err != nil {
+		return err
+	}
+	settings := h.deliverySettings()
+	out := make([]workspaceAsset, 0, len(items))
+	for _, item := range items {
+		if old, ok := legacy[item.ID]; ok {
+			out = append(out, old)
+		} else {
+			out = append(out, settings.asset(item))
+		}
+	}
+	return workspaceJSON(c, http.StatusOK, gin.H{"items": out, "next_cursor": cursor}, nil)
+}
+
+func workspaceQueryBool(c *gin.Context, name string) (bool, error) {
+	if raw, ok := c.GetQuery(name); ok {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return false, workspace.ValidationError(name + " must be true or false")
+		}
+		return enabled, nil
+	}
+	return false, nil
 }
 
 func (h workspaceHTTP) image(c *gin.Context, actor workspace.Identity) error {
-	item, variants, err := h.store.Image(actor, c.Param("imageID"))
+	id := c.Param("imageID")
+	item, variants, err := h.store.Image(actor, id)
+	if errors.Is(err, workspace.ErrNotFound) && actor.IsAdmin() && len(id) == 32 {
+		if old, ok := findLegacyImageByID(h.cfg, id); ok {
+			return workspaceJSON(c, http.StatusOK, gin.H{"image": old, "variants": []workspaceAsset{}}, nil)
+		}
+	}
 	settings := h.deliverySettings()
 	return workspaceJSON(c, http.StatusOK, gin.H{"image": settings.asset(item), "variants": settings.assets(variants)}, err)
 }
@@ -370,7 +435,18 @@ func (h workspaceHTTP) uploadImage(c *gin.Context, actor workspace.Identity) err
 		return err
 	}
 	defer file.Close()
-	item, err := h.store.Upload(actor, c.Query("owner_id"), c.PostForm("folder"), header.Filename, file, header.Size, maxSize)
+	owner, folder := c.Query("owner_id"), c.PostForm("folder")
+	item, err := h.store.Upload(actor, owner, folder, header.Filename, file, header.Size, maxSize)
+	if errors.Is(err, workspace.ErrFolderNotFound) {
+		bound, bindErr := h.useLegacyFolder(actor, owner, folder)
+		if bindErr != nil {
+			return bindErr
+		}
+		if bound {
+			// The first upload attempt checks the destination before reading the file.
+			item, err = h.store.Upload(actor, owner, folder, header.Filename, file, header.Size, maxSize)
+		}
+	}
 	if err == nil {
 		c.Header("Location", h.base+"/images/"+item.ID)
 	}
@@ -385,7 +461,21 @@ func (h workspaceHTTP) createVariant(c *gin.Context, actor workspace.Identity) e
 	if err := readWorkspaceJSON(c, &input); err != nil {
 		return err
 	}
-	item, err := h.store.CreateVariant(c.Request.Context(), actor, c.Param("imageID"), input.Folder, input.Transform)
+	id := c.Param("imageID")
+	item, err := h.store.CreateVariant(c.Request.Context(), actor, id, input.Folder, input.Transform)
+	if errors.Is(err, workspace.ErrFolderNotFound) && actor.IsAdmin() && input.Folder != nil {
+		original, _, lookupErr := h.store.Image(actor, id)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		bound, bindErr := h.useLegacyFolder(actor, original.OwnerID, *input.Folder)
+		if bindErr != nil {
+			return bindErr
+		}
+		if bound {
+			item, err = h.store.CreateVariant(c.Request.Context(), actor, id, input.Folder, input.Transform)
+		}
+	}
 	response := h.deliverySettings().asset(item)
 	if err == nil {
 		c.Header("Location", response.URL)

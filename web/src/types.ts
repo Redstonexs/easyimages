@@ -98,7 +98,7 @@ export interface AdminBootstrap {
   workspace_api_base: string
 }
 
-export type AdminView = 'manager' | 'chart' | 'history' | 'urllist' | 'filer' | 'workspace'
+export type AdminView = 'manager' | 'chart' | 'history' | 'filer' | 'workspace'
 
 export interface AdminConfig {
   title: string
@@ -186,16 +186,6 @@ export interface AdminFileEntry {
   size?: number
   size_human?: string
   modified_at?: string
-}
-
-export interface AdminURLList {
-  path: string
-  q: string
-  page: number
-  page_size: number
-  total: number
-  total_pages: number
-  files: AdminFileEntry[]
 }
 
 export interface AdminFiler {

@@ -169,34 +169,6 @@ func accountLogin(cfg *config.Config, store *workspace.Store, user, password str
 	return service.Session{UserID: actor.ID, AuthVersion: actor.AuthVersion}, ok
 }
 
-func List(cfg *config.Config) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		initial, err := imageListPayload(c, cfg)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		c.HTML(http.StatusOK, "list.html", gin.H{
-			"config":  cfg,
-			"initial": initial,
-		})
-	}
-}
-
-// ImageListAPI returns public gallery data for frontend rendering and caching.
-func ImageListAPI(cfg *config.Config) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		payload, err := imageListPayload(c, cfg)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		setFrontendAPIHeaders(c)
-		c.JSON(http.StatusOK, payload)
-	}
-}
-
 func Upload(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 检查登录
@@ -1267,89 +1239,6 @@ func HistoryDelete(cfg *config.Config) gin.HandlerFunc {
 func Filer(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.HTML(http.StatusOK, "admin_filer.html", adminShellData(c, cfg, "filer"))
-	}
-}
-
-// ImageURLList 图片URL列表页面
-func ImageURLList(cfg *config.Config) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "admin_urllist.html", adminShellData(c, cfg, "urllist"))
-	}
-}
-
-// ImageURLListAPI 图片URL列表API（JSON）
-func ImageURLListAPI(cfg *config.Config) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		reqPath := c.DefaultQuery("path", cfg.Path)
-		pageStr := c.DefaultQuery("page", "1")
-		pageSizeStr := c.DefaultQuery("page_size", "100")
-
-		page, _ := strconv.Atoi(pageStr)
-		if page < 1 {
-			page = 1
-		}
-		pageSize, _ := strconv.Atoi(pageSizeStr)
-		if pageSize < 1 || pageSize > 500 {
-			pageSize = 100
-		}
-
-		// 验证路径安全性（filepath.Clean 规范化后检查 ".."，防止 Windows 反斜杠绕过）
-		reqPath, err := service.ValidateURLPath(reqPath, cfg.Path)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path"})
-			return
-		}
-		if !strings.HasSuffix(reqPath, "/") {
-			reqPath += "/"
-		}
-
-		fsPath := "." + reqPath
-		// 获取所有文件并过滤图片（GetFileListRecursive 已跳过系统内部目录）
-		rawFiles := service.GetFileListRecursive(fsPath)
-		var allFiles []string
-		for _, name := range rawFiles {
-			// 排除webp目录下的重复文件和非图片文件
-			if !strings.HasPrefix(name, "webp/") && service.IsImageFile(name) {
-				allFiles = append(allFiles, name)
-			}
-		}
-
-		total := len(allFiles)
-		start := (page - 1) * pageSize
-		end := start + pageSize
-		if start > total {
-			start = total
-		}
-		if end > total {
-			end = total
-		}
-
-		type FileInfo struct {
-			Name    string `json:"name"`
-			URL     string `json:"url"`
-			WebPURL string `json:"webp_url,omitempty"`
-		}
-
-		files := make([]FileInfo, 0, end-start)
-		for _, name := range allFiles[start:end] {
-			relativePath := reqPath + name
-			url := cfg.Domain + relativePath
-			webpURL := service.GetWebPURL(relativePath, cfg)
-
-			files = append(files, FileInfo{
-				Name:    name,
-				URL:     url,
-				WebPURL: webpURL,
-			})
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"total":       total,
-			"page":        page,
-			"page_size":   pageSize,
-			"total_pages": (total + pageSize - 1) / pageSize,
-			"files":       files,
-		})
 	}
 }
 
