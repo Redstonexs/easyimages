@@ -10,7 +10,7 @@ import (
 )
 
 // Version is the application version, overridden at build time via ldflags.
-var Version = "6.0.0"
+var Version = "6.1.0"
 
 const (
 	defaultDomain       = "http://127.0.0.1:8080"
