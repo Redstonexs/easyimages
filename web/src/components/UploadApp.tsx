@@ -610,7 +610,8 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
     if (captcha.type === 'turnstile' && captcha.site_key) {
       const render = () => {
         if (cancelled) return
-        if (!window.turnstile || !document.getElementById('login-turnstile-container')) {
+        const container = document.getElementById('login-turnstile-container')
+        if (!window.turnstile || !container) {
           window.setTimeout(render, 100)
           return
         }
@@ -618,8 +619,11 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
           window.turnstile.reset('#login-turnstile-container')
           return
         }
+        const width = container.clientWidth
         window.turnstile.render('#login-turnstile-container', {
           sitekey: captcha.site_key || '',
+          size: width > 0 && width < 300 ? 'compact' : 'flexible',
+          theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
           callback: token => setExternalCaptchaToken(token)
         })
         turnstileRenderedRef.current = true
@@ -1167,14 +1171,16 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
             )}
 
             {captcha.type === 'turnstile' && (
-              <div id="login-turnstile-container" className="min-h-16" />
+              <div id="login-turnstile-container" className="captcha-turnstile-shell" />
             )}
 
             {captcha.type === 'cap' && (
-              <cap-widget
-                ref={capWidgetRef as React.RefObject<HTMLElement>}
-                data-cap-api-endpoint={captcha.api_endpoint}
-              />
+              <div className="flex w-full justify-center">
+                <cap-widget
+                  ref={capWidgetRef as React.RefObject<HTMLElement>}
+                  data-cap-api-endpoint={captcha.api_endpoint}
+                />
+              </div>
             )}
 
             <DialogFooter className="pt-2">

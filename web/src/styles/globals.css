@@ -294,8 +294,40 @@ html.theme-transitioning *::after {
   background-size: 14px 14px;
 }
 
+.captcha-turnstile-shell {
+  width: 100%;
+  min-height: 65px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.captcha-turnstile-shell > div {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
 cap-widget {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 100%;
+  min-height: 58px;
+  --cap-widget-width: 100%;
+  --cap-border-radius: 8px;
+  --cap-background: var(--card);
+  --cap-border-color: var(--input);
+  --cap-color: var(--foreground);
+  --cap-checkbox-border: 1px solid color-mix(in srgb, var(--foreground) 26%, transparent);
+  --cap-checkbox-background: var(--muted);
+  --cap-checkbox-border-radius: 6px;
+  --cap-spinner-color: var(--foreground);
+  --cap-spinner-background-color: var(--border);
+  --cap-troubleshoot-color: var(--muted-foreground);
+  --cap-focus-ring: var(--ring);
+  --cap-font: inherit;
 }
 
 @media (prefers-reduced-motion: reduce) {

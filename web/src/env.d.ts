@@ -6,7 +6,15 @@ declare global {
     EasyImageUpload?: import('./types').UploadBootstrap
     EasyImageAdmin?: import('./types').AdminBootstrap
     turnstile?: {
-      render: (selector: string, options: { sitekey: string; callback: (token: string) => void }) => unknown
+      render: (
+        selector: string,
+        options: {
+          sitekey: string
+          size?: 'normal' | 'flexible' | 'compact'
+          theme?: 'auto' | 'light' | 'dark'
+          callback: (token: string) => void
+        }
+      ) => unknown
       reset: (selector: string) => void
     }
     grecaptcha?: {
