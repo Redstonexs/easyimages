@@ -3,6 +3,7 @@ import { Files, HardDrive, Tag, TrendingUp } from 'lucide-react'
 import type { AdminChart as AdminChartData } from '@/types'
 import type { NoticeType } from '@/shared/notify'
 import { adminApi } from '@/shared/adminApi'
+import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -13,6 +14,7 @@ export default function AdminChart({ onNotice }: { onNotice: (message: string, t
   const [loading, setLoading] = useState(true)
   const [chart, setChart] = useState<AdminChartData | null>(null)
   const [hoveredDay, setHoveredDay] = useState<{ date: string; count: number } | null>(null)
+  const showSkeleton = useDelayedLoading(loading)
 
   useEffect(() => {
     let cancelled = false
@@ -44,8 +46,9 @@ export default function AdminChart({ onNotice }: { onNotice: (message: string, t
   }, [chart])
 
   if (loading) {
+    if (!showSkeleton) return <div className="min-h-[420px]" aria-busy="true" />
     return (
-      <div className="space-y-4">
+      <div className="panel-enter space-y-4">
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
         </div>
@@ -60,7 +63,7 @@ export default function AdminChart({ onNotice }: { onNotice: (message: string, t
   const todayCount = chart.daily_stats[chart.daily_stats.length - 1]?.count || 0
 
   return (
-    <div className="space-y-6">
+    <div className="panel-enter space-y-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Card className="gap-1 py-4">
           <CardContent className="flex items-center justify-between">
@@ -112,24 +115,30 @@ export default function AdminChart({ onNotice }: { onNotice: (message: string, t
         </CardHeader>
         <CardContent>
           <div className="flex h-60 items-end gap-1.5 overflow-x-auto pb-2 pt-4">
-            {chart.daily_stats.map(item => {
+            {chart.daily_stats.map((item, idx) => {
               const heightPct = item.count === 0 ? 2 : Math.max(6, Math.round((item.count / maxDaily) * 100))
               return (
                 <div
                   key={item.date}
+                  tabIndex={0}
                   onMouseEnter={() => setHoveredDay(item)}
                   onMouseLeave={() => setHoveredDay(null)}
-                  className="group flex h-full min-w-[20px] flex-1 flex-col items-center justify-end gap-1.5"
+                  onFocus={() => setHoveredDay(item)}
+                  onBlur={() => setHoveredDay(null)}
+                  className="group flex h-full min-w-[20px] flex-1 flex-col items-center justify-end gap-1.5 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
-                  <span className="font-mono text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 tabular-nums">
+                  <span className="font-mono text-[10px] text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 tabular-nums">
                     {item.count}
                   </span>
                   <div className="flex w-full flex-1 items-end">
                     <div
-                      style={{ height: `${heightPct}%` }}
-                      className={`w-full rounded-t-sm transition-colors ${
+                      style={{
+                        height: `${heightPct}%`,
+                        animationDelay: `${Math.min(idx * 10, 240)}ms`
+                      }}
+                      className={`bar-grow w-full rounded-t-sm transition-colors duration-150 ${
                         item.count > 0
-                          ? 'bg-foreground/80 group-hover:bg-foreground'
+                          ? 'bg-foreground/80 group-hover:bg-foreground group-focus-visible:bg-foreground'
                           : 'bg-muted'
                       }`}
                     />

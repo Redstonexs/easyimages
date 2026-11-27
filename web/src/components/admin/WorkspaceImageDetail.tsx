@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Copy, ExternalLink, Loader2, Sparkles, Trash2 } from 'lucide-react'
+import { AlertCircle, Copy, ExternalLink, Loader2, Sparkles, Trash2, X } from 'lucide-react'
 import type { NoticeType } from '@/shared/notify'
 import { formatSize } from '@/shared/format'
 import { useCopy } from '@/shared/useCopy'
+import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import type { WorkspaceAsset, WorkspaceFolder, WorkspaceTransform } from '@/shared/workspaceApi'
 import { workspaceApi } from '@/shared/workspaceApi'
 import { useConfirmDialog } from '@/components/ConfirmDialog'
+import { FadeImage } from '@/components/FadeImage'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,6 +23,7 @@ interface WorkspaceImageDetailProps {
   id: string
   folders: WorkspaceFolder[]
   onNotice: (message: string, type?: NoticeType) => void
+  onClose?: () => void
   onRemoved: () => void
   onChanged: () => void
 }
@@ -29,6 +32,7 @@ export default function WorkspaceImageDetail({
   id,
   folders,
   onNotice,
+  onClose,
   onRemoved,
   onChanged
 }: WorkspaceImageDetailProps) {
@@ -49,6 +53,7 @@ export default function WorkspaceImageDetail({
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const showSkeleton = useDelayedLoading(loading)
 
   useEffect(() => {
     let cancelled = false
@@ -147,11 +152,12 @@ export default function WorkspaceImageDetail({
   }
 
   if (loading) {
-    return <Skeleton className="h-80 rounded-xl" />
+    if (!showSkeleton) return <div className="min-h-64" aria-busy="true" />
+    return <Skeleton className="panel-enter h-80 rounded-xl" />
   }
 
   return (
-    <Card id="workspace-image-detail" tabIndex={-1} aria-label="图片详情">
+    <Card id="workspace-image-detail" tabIndex={-1} aria-label="图片详情" className="panel-enter">
       {confirmDialog}
 
       {image && (
@@ -164,7 +170,7 @@ export default function WorkspaceImageDetail({
                 {image.width && image.height ? ` · ${image.width} × ${image.height}` : ''}
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <Button variant="outline" size="xs" asChild>
                 <a href={image.url} target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="size-3.5" />
@@ -175,6 +181,11 @@ export default function WorkspaceImageDetail({
                 <Button type="button" variant="outline" size="xs" disabled={busy} onClick={() => void remove()}>
                   <Trash2 className="size-3.5" />
                   删除原图
+                </Button>
+              )}
+              {onClose && (
+                <Button type="button" variant="ghost" size="icon-xs" aria-label="关闭图片详情" onClick={onClose}>
+                  <X className="size-3.5" />
                 </Button>
               )}
             </div>
@@ -188,10 +199,10 @@ export default function WorkspaceImageDetail({
                 rel="noopener noreferrer"
                 className="checker-well flex min-h-56 items-center justify-center overflow-hidden rounded-lg border p-3"
               >
-                <img
+                <FadeImage
                   src={image.url}
                   alt={image.filename}
-                  decoding="async"
+                  loading="eager"
                   className="max-h-72 max-w-full rounded object-contain"
                 />
               </a>

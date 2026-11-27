@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>文件管理 - {{.config.Title}}</title>
     <link rel="icon" href="{{.config.SiteIcon}}">
-    <script>(function(){try{var t=localStorage.getItem('easyimage-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})();</script>
+    <meta name="color-scheme" content="light dark">
+    <style>html{background:#ffffff;color:#0a0a0a;color-scheme:light}html.dark{background:#0a0a0a;color:#f7f7f5;color-scheme:dark}body{margin:0;min-height:100vh;background:inherit;color:inherit}</style>
+    <script>(function(){try{var t=localStorage.getItem('easyimage-theme');var d=t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;if(d){r.classList.add('dark');r.style.colorScheme='dark'}else{r.style.colorScheme='light'}}catch(e){}})();</script>
     {{vite "web/src/entries/admin.ts"}}
 </head>
 <body>

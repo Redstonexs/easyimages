@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   CloudUpload,
   Code2,
@@ -27,6 +29,7 @@ import type { LinkFormat } from '@/shared/uploadFormats'
 import { formatResults, resultName } from '@/shared/uploadFormats'
 import { useCopy } from '@/shared/useCopy'
 import { notifyToast } from '@/shared/useNotices'
+import { FadeImage } from '@/components/FadeImage'
 import { SiteHeader } from '@/components/SiteHeader'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -153,7 +156,7 @@ function UploadResultCard({ result, activeFormat, onCopy, onPreview }: UploadRes
   }
 
   return (
-    <Card className="overflow-hidden py-0 transition-shadow hover:shadow-sm">
+    <Card className="panel-enter overflow-hidden py-0 transition-[border-color,box-shadow] duration-200 hover:border-foreground/25 hover:shadow-sm">
       <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start">
         <button
           type="button"
@@ -161,11 +164,9 @@ function UploadResultCard({ result, activeFormat, onCopy, onPreview }: UploadRes
           className="checker-well group relative h-28 w-full shrink-0 overflow-hidden rounded-lg border sm:size-28 cursor-pointer"
           title="放大预览"
         >
-          <img
-            src={result.thumb || result.url}
+          <FadeImage
+            src={result.thumb || result.url || ''}
             alt={name || '上传预览'}
-            loading="lazy"
-            decoding="async"
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         </button>
@@ -715,6 +716,32 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
     void copy(formatResults(results, format), `已复制 ${copyableResults.length} 条链接`)
   }
 
+  const previewIndex = useMemo(() => {
+    if (!previewResult) return -1
+    return copyableResults.findIndex(item => item === previewResult || (item.url && item.url === previewResult.url))
+  }, [copyableResults, previewResult])
+
+  const stepPreview = useCallback((delta: number) => {
+    if (copyableResults.length <= 1 || previewIndex < 0) return
+    const nextIdx = (previewIndex + delta + copyableResults.length) % copyableResults.length
+    setPreviewResult(copyableResults[nextIdx])
+  }, [copyableResults, previewIndex])
+
+  useEffect(() => {
+    if (!previewResult || copyableResults.length <= 1) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        stepPreview(-1)
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        stepPreview(1)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [previewResult, copyableResults.length, stepPreview])
+
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <Toaster />
@@ -722,9 +749,13 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
       {isWindowDragging && (
         <div
           aria-hidden="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm pointer-events-none"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/85 backdrop-blur-sm pointer-events-none animate-in fade-in duration-150"
         >
-          <div className="viewfinder-frame flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-foreground bg-card px-14 py-12 shadow-xl" data-active="true">
+          <div className="viewfinder-frame flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-foreground bg-card px-14 py-12 shadow-xl animate-in zoom-in-95 duration-150" data-active="true">
+            <span className="viewfinder-corner viewfinder-corner-tl" />
+            <span className="viewfinder-corner viewfinder-corner-tr" />
+            <span className="viewfinder-corner viewfinder-corner-bl" />
+            <span className="viewfinder-corner viewfinder-corner-br" />
             <CloudUpload className="size-10 text-foreground" />
             <p className="text-lg font-semibold tracking-tight">松开即可开始上传</p>
             <p className="text-xs text-muted-foreground">单文件最大 {maxSizeLabel}</p>
@@ -739,13 +770,13 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
           <nav className="flex items-center gap-1" aria-label="主导航">
             {bootstrap.is_admin && (
               <>
-                <Button variant="ghost" size="sm" asChild>
+                <Button variant="ghost" size="sm" className="hidden sm:inline-flex" asChild>
                   <a href="/admin/workspace">
                     <FolderOpen className="size-4" />
                     <span className="hidden md:inline">图片库</span>
                   </a>
                 </Button>
-                <Button variant="ghost" size="sm" asChild>
+                <Button variant="ghost" size="sm" className="hidden sm:inline-flex" asChild>
                   <a href="/admin/history">
                     <History className="size-4" />
                     <span className="hidden md:inline">历史</span>
@@ -754,7 +785,7 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
               </>
             )}
             {bootstrap.config.api_status === 1 && (
-              <Button variant="ghost" size="sm" asChild>
+              <Button variant="ghost" size="sm" className="hidden sm:inline-flex" asChild>
                 <a href="/api/">
                   <Code2 className="size-4" />
                   <span className="hidden md:inline">API</span>
@@ -769,7 +800,7 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
         )}
       />
 
-      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-4 py-10 sm:px-6 sm:py-14">
+      <main className="view-enter mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-4 py-10 sm:px-6 sm:py-14">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-1.5">
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
@@ -812,15 +843,19 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
             if (next && event.currentTarget.contains(next)) return
             setIsDragging(false)
           }}
-          className={`viewfinder-frame group flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed px-6 py-14 text-center transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer ${
+          className={`viewfinder-frame group flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed px-6 py-16 text-center transition-[border-color,background-color,box-shadow,transform] duration-200 outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer ${
             isDragging
-              ? 'border-foreground bg-muted/70'
+              ? 'border-foreground bg-muted/75 shadow-sm scale-[1.005]'
               : isUploading
                 ? 'border-foreground/50 bg-muted/30'
                 : 'border-border bg-card hover:border-foreground/50 hover:bg-muted/25'
           }`}
         >
-          <div className="grid size-12 place-items-center rounded-full border bg-background shadow-xs transition-transform group-hover:-translate-y-0.5">
+          <span className="viewfinder-corner viewfinder-corner-tl" aria-hidden="true" />
+          <span className="viewfinder-corner viewfinder-corner-tr" aria-hidden="true" />
+          <span className="viewfinder-corner viewfinder-corner-bl" aria-hidden="true" />
+          <span className="viewfinder-corner viewfinder-corner-br" aria-hidden="true" />
+          <div className="grid size-13 place-items-center rounded-full border bg-background shadow-xs transition-transform duration-200 group-hover:-translate-y-1 group-hover:shadow-sm">
             {isUploading ? (
               <Loader2 className="size-5 animate-spin text-foreground" />
             ) : (
@@ -883,12 +918,25 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
         </section>
 
         {progressItems.length > 0 && (
-          <Card aria-live="polite" className="gap-4 py-4">
+          <Card aria-live="polite" className="panel-enter gap-4 py-4">
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2 text-sm">
                   <span className="font-medium">{overallInfo}</span>
-                  <span className="font-mono text-xs tabular-nums text-muted-foreground">{overallPercent}%</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs tabular-nums text-muted-foreground">{overallPercent}%</span>
+                    {!isUploading && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label="关闭上传进度"
+                        onClick={() => setProgressItems([])}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <Progress value={overallPercent} />
               </div>
@@ -983,17 +1031,48 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
           {previewResult && (
             <>
               <DialogHeader>
-                <DialogTitle className="truncate pr-8 text-sm font-medium">
-                  {resultName(previewResult) || '图片预览'}
+                <DialogTitle className="flex items-center gap-2 pr-8 text-sm font-medium">
+                  <span className="truncate">{resultName(previewResult) || '图片预览'}</span>
+                  {copyableResults.length > 1 && previewIndex >= 0 && (
+                    <Badge variant="outline" className="shrink-0 font-mono text-[10px] font-normal tabular-nums">
+                      {previewIndex + 1} / {copyableResults.length}
+                    </Badge>
+                  )}
                 </DialogTitle>
                 <DialogDescription className="truncate font-mono text-xs">
                   {previewResult.url}
                 </DialogDescription>
               </DialogHeader>
-              <div className="checker-well flex max-h-[70vh] items-center justify-center overflow-hidden rounded-lg border p-2">
-                <img
-                  src={previewResult.url}
+              <div className="checker-well relative flex max-h-[70vh] min-h-[220px] items-center justify-center overflow-hidden rounded-lg border p-2">
+                {copyableResults.length > 1 && (
+                  <>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="secondary"
+                      aria-label="上一张"
+                      onClick={() => stepPreview(-1)}
+                      className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-background/85 shadow-sm backdrop-blur-xs hover:bg-background"
+                    >
+                      <ChevronLeft className="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="secondary"
+                      aria-label="下一张"
+                      onClick={() => stepPreview(1)}
+                      className="absolute right-2.5 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-background/85 shadow-sm backdrop-blur-xs hover:bg-background"
+                    >
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  </>
+                )}
+                <FadeImage
+                  key={previewResult.url}
+                  src={previewResult.url || ''}
                   alt={resultName(previewResult)}
+                  loading="eager"
                   className="max-h-[66vh] max-w-full rounded object-contain"
                 />
               </div>

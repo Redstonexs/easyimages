@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, ExternalLink, ImageOff, Info, Loader2, Search, Trash2, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, ExternalLink, ImageOff, Info, Loader2, Search, Trash2, X } from 'lucide-react'
 import type { GalleryBootstrap, GalleryFile } from '@/types'
 import type { NoticeType } from '@/shared/notify'
 import { adminApi } from '@/shared/adminApi'
 import { runBatchDelete, summarizeBatchDelete } from '@/shared/batchDelete'
 import { useCopy } from '@/shared/useCopy'
+import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import { useConfirmDialog } from '@/components/ConfirmDialog'
+import { FadeImage } from '@/components/FadeImage'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -32,9 +34,9 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
   const [loading, setLoading] = useState(true)
   const [gallery, setGallery] = useState<GalleryBootstrap | null>(null)
   const [selectedImage, setSelectedImage] = useState<GalleryFile | null>(null)
-  const [failedThumbs, setFailedThumbs] = useState<Set<string>>(() => new Set())
   const [queryInput, setQueryInput] = useState('')
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const showInitialSkeleton = useDelayedLoading(loading && !gallery)
 
   const inflightRef = useRef<AbortController | null>(null)
   const galleryRef = useRef(gallery)
@@ -84,6 +86,32 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
   const files = gallery?.files || []
   const selectedFiles = useMemo(() => files.filter(file => selected.has(file.url)), [files, selected])
   const allSelected = files.length > 0 && selectedFiles.length === files.length
+
+  const previewIndex = useMemo(() => {
+    if (!selectedImage) return -1
+    return files.findIndex(file => file.url === selectedImage.url)
+  }, [files, selectedImage])
+
+  const stepPreview = useCallback((delta: number) => {
+    if (files.length <= 1 || previewIndex < 0) return
+    const nextIdx = (previewIndex + delta + files.length) % files.length
+    setSelectedImage(files[nextIdx])
+  }, [files, previewIndex])
+
+  useEffect(() => {
+    if (!selectedImage || files.length <= 1) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        stepPreview(-1)
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        stepPreview(1)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selectedImage, files.length, stepPreview])
 
   function toggleFile(file: GalleryFile) {
     setSelected(prev => {
@@ -145,8 +173,9 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
   }
 
   if (loading && !gallery) {
+    if (!showInitialSkeleton) return <div className="min-h-[360px]" aria-busy="true" />
     return (
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="panel-enter grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="aspect-[4/3] rounded-xl" />)}
       </div>
     )
@@ -155,10 +184,11 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
   if (!gallery) return null
 
   return (
-    <div className="space-y-4">
+    <div className="panel-enter space-y-4">
       {confirmDialog}
 
-      <Card className="gap-3 p-4">
+      <Card className="relative gap-3 overflow-hidden p-4">
+        {loading && <div className="loading-bar absolute inset-x-0 top-0" aria-hidden="true" />}
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-1.5">
             <Button
@@ -285,15 +315,15 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
       )}
 
       {files.length > 0 ? (
-        <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <section className={`grid grid-cols-2 gap-4 transition-opacity duration-200 sm:grid-cols-3 lg:grid-cols-4 ${loading ? 'opacity-60' : 'opacity-100'}`}>
           {files.map(file => {
             const name = displayName(file)
             const isSelected = selected.has(file.url)
             return (
               <article
                 key={file.url}
-                className={`group relative flex flex-col overflow-hidden rounded-xl border bg-card transition-all ${
-                  isSelected ? 'ring-2 ring-foreground' : 'hover:border-foreground/30'
+                className={`group relative flex flex-col overflow-hidden rounded-xl border bg-card transition-[border-color,box-shadow,transform] duration-200 ${
+                  isSelected ? 'ring-2 ring-foreground' : 'hover:-translate-y-0.5 hover:border-foreground/30 hover:shadow-sm'
                 }`}
               >
                 <div
@@ -312,21 +342,13 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
                   onClick={() => setSelectedImage(file)}
                   className="checker-well block aspect-[4/3] w-full overflow-hidden border-b cursor-pointer"
                 >
-                  {failedThumbs.has(file.url) ? (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-4 text-xs text-muted-foreground">
-                      <ImageOff className="size-5 opacity-50" />
-                      <span className="line-clamp-2 break-all">{name}</span>
-                    </div>
-                  ) : (
-                    <img
-                      src={file.thumb_url}
-                      alt={name}
-                      loading="lazy"
-                      decoding="async"
-                      onError={() => setFailedThumbs(prev => new Set([...prev, file.url]))}
-                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                    />
-                  )}
+                  <FadeImage
+                    src={file.thumb_url}
+                    alt={name}
+                    fallbackLabel={name}
+                    iconClassName="size-5"
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                  />
                 </button>
 
                 <div className="flex flex-1 flex-col justify-between gap-2 p-3">
@@ -373,27 +395,75 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
           {selectedImage && (
             <>
               <DialogHeader>
-                <DialogTitle className="truncate pr-8 text-sm font-medium">{displayName(selectedImage)}</DialogTitle>
+                <DialogTitle className="flex items-center gap-2 pr-8 text-sm font-medium">
+                  <span className="truncate">{displayName(selectedImage)}</span>
+                  {files.length > 1 && previewIndex >= 0 && (
+                    <Badge variant="outline" className="shrink-0 font-mono text-[10px] font-normal tabular-nums">
+                      {previewIndex + 1} / {files.length}
+                    </Badge>
+                  )}
+                </DialogTitle>
                 <DialogDescription className="truncate font-mono text-xs">{selectedImage.url}</DialogDescription>
               </DialogHeader>
-              <div className="checker-well flex max-h-[72vh] items-center justify-center overflow-hidden rounded-lg border p-2">
-                <img
+              <div className="checker-well relative flex max-h-[72vh] min-h-[240px] items-center justify-center overflow-hidden rounded-lg border p-2">
+                {files.length > 1 && (
+                  <>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="secondary"
+                      aria-label="上一张"
+                      onClick={() => stepPreview(-1)}
+                      className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-background/85 shadow-sm backdrop-blur-xs hover:bg-background"
+                    >
+                      <ChevronLeft className="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="secondary"
+                      aria-label="下一张"
+                      onClick={() => stepPreview(1)}
+                      className="absolute right-2.5 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-background/85 shadow-sm backdrop-blur-xs hover:bg-background"
+                    >
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  </>
+                )}
+                <FadeImage
+                  key={selectedImage.url}
                   src={selectedImage.url}
                   alt={displayName(selectedImage)}
+                  loading="eager"
                   className="max-h-[68vh] max-w-full rounded object-contain"
                 />
               </div>
-              <DialogFooter>
-                <Button type="button" size="sm" onClick={() => void copy(selectedImage.url)}>
-                  <Copy className="size-3.5" />
-                  复制链接
+              <DialogFooter className="sm:justify-between">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    const target = selectedImage
+                    setSelectedImage(null)
+                    void removeOne(target)
+                  }}
+                >
+                  <Trash2 className="size-3.5" />
+                  删除
                 </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <a href={selectedImage.url} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="size-3.5" />
-                    新窗口打开
-                  </a>
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" size="sm" onClick={() => void copy(selectedImage.url)}>
+                    <Copy className="size-3.5" />
+                    复制链接
+                  </Button>
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={selectedImage.url} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="size-3.5" />
+                      新窗口打开
+                    </a>
+                  </Button>
+                </div>
               </DialogFooter>
             </>
           )}

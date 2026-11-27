@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowUp,
+  ChevronLeft,
   ChevronRight,
   Copy,
   ExternalLink,
   Folder,
-  ImageOff,
   Inbox,
   RefreshCw,
   Search,
@@ -18,7 +18,9 @@ import { adminApi } from '@/shared/adminApi'
 import { runBatchDelete, summarizeBatchDelete } from '@/shared/batchDelete'
 import { formatSize } from '@/shared/format'
 import { useCopy } from '@/shared/useCopy'
+import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import { useConfirmDialog } from '@/components/ConfirmDialog'
+import { FadeImage } from '@/components/FadeImage'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -49,10 +51,10 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
 
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<AdminFilerData | null>(null)
-  const [failedThumbs, setFailedThumbs] = useState<Set<string>>(() => new Set())
   const [queryInput, setQueryInput] = useState('')
   const [selectedImage, setSelectedImage] = useState<AdminFileEntry | null>(null)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const showInitialSkeleton = useDelayedLoading(loading && !data)
 
   const load = useCallback(async (path?: string) => {
     setLoading(true)
@@ -78,8 +80,16 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
 
   const breadcrumbs = useMemo(() => {
     if (!data) return []
-    let cumulative = '/'
-    return data.path.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean).map(segment => {
+    const rootNorm = data.root_path.replace(/^\/+|\/+$/g, '')
+    const pathNorm = data.path.replace(/^\/+|\/+$/g, '')
+    const rel = pathNorm === rootNorm
+      ? ''
+      : pathNorm.startsWith(`${rootNorm}/`)
+        ? pathNorm.slice(rootNorm.length + 1)
+        : pathNorm
+    if (!rel) return []
+    let cumulative = data.root_path.endsWith('/') ? data.root_path : `${data.root_path}/`
+    return rel.split('/').filter(Boolean).map(segment => {
       cumulative += `${segment}/`
       return { label: segment, path: cumulative }
     })
@@ -107,6 +117,32 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
     [selectedFiles]
   )
   const allSelected = filteredFiles.length > 0 && selectedFiles.length === filteredFiles.length
+
+  const previewIndex = useMemo(() => {
+    if (!selectedImage) return -1
+    return filteredFiles.findIndex(file => file.url === selectedImage.url)
+  }, [filteredFiles, selectedImage])
+
+  const stepPreview = useCallback((delta: number) => {
+    if (filteredFiles.length <= 1 || previewIndex < 0) return
+    const nextIdx = (previewIndex + delta + filteredFiles.length) % filteredFiles.length
+    setSelectedImage(filteredFiles[nextIdx])
+  }, [filteredFiles, previewIndex])
+
+  useEffect(() => {
+    if (!selectedImage || filteredFiles.length <= 1) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        stepPreview(-1)
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        stepPreview(1)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selectedImage, filteredFiles.length, stepPreview])
 
   function toggleFile(file: AdminFileEntry) {
     setSelected(prev => {
@@ -170,16 +206,18 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
   }
 
   if (loading && !data) {
-    return <Skeleton className="h-[520px] rounded-xl" />
+    if (!showInitialSkeleton) return <div className="min-h-[420px]" aria-busy="true" />
+    return <Skeleton className="panel-enter h-[520px] rounded-xl" />
   }
 
   if (!data) return null
 
   return (
-    <div className="space-y-4">
+    <div className="panel-enter space-y-4">
       {confirmDialog}
 
-      <Card className="overflow-hidden gap-0 py-0">
+      <Card className="relative overflow-hidden gap-0 py-0">
+        {loading && <div className="loading-bar absolute inset-x-0 top-0 z-10" aria-hidden="true" />}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
           <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" aria-label="文件路径">
             <Button
@@ -331,23 +369,14 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
                             <button
                               type="button"
                               onClick={() => setSelectedImage(file)}
-                              className="checker-well block size-11 overflow-hidden rounded-md border cursor-pointer"
+                              className="checker-well block size-11 overflow-hidden rounded-md border transition-transform duration-150 hover:scale-105 cursor-pointer"
                               title={`预览 ${name}`}
                             >
-                              {failedThumbs.has(file.url) ? (
-                                <span className="grid h-full w-full place-items-center text-muted-foreground">
-                                  <ImageOff className="size-4" />
-                                </span>
-                              ) : (
-                                <img
-                                  src={file.thumb_url}
-                                  alt={name}
-                                  loading="lazy"
-                                  decoding="async"
-                                  onError={() => setFailedThumbs(prev => new Set([...prev, file.url]))}
-                                  className="h-full w-full object-cover"
-                                />
-                              )}
+                              <FadeImage
+                                src={file.thumb_url}
+                                alt={name}
+                                className="h-full w-full object-cover"
+                              />
                             </button>
                           </TableCell>
                           <TableCell className="max-w-[260px]">
@@ -422,27 +451,75 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
           {selectedImage && (
             <>
               <DialogHeader>
-                <DialogTitle className="truncate pr-8 text-sm font-medium">{displayName(selectedImage)}</DialogTitle>
+                <DialogTitle className="flex items-center gap-2 pr-8 text-sm font-medium">
+                  <span className="truncate">{displayName(selectedImage)}</span>
+                  {filteredFiles.length > 1 && previewIndex >= 0 && (
+                    <Badge variant="outline" className="shrink-0 font-mono text-[10px] font-normal tabular-nums">
+                      {previewIndex + 1} / {filteredFiles.length}
+                    </Badge>
+                  )}
+                </DialogTitle>
                 <DialogDescription className="truncate font-mono text-xs">{selectedImage.path}</DialogDescription>
               </DialogHeader>
-              <div className="checker-well flex max-h-[72vh] items-center justify-center overflow-hidden rounded-lg border p-2">
-                <img
+              <div className="checker-well relative flex max-h-[72vh] min-h-[240px] items-center justify-center overflow-hidden rounded-lg border p-2">
+                {filteredFiles.length > 1 && (
+                  <>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="secondary"
+                      aria-label="上一张"
+                      onClick={() => stepPreview(-1)}
+                      className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-background/85 shadow-sm backdrop-blur-xs hover:bg-background"
+                    >
+                      <ChevronLeft className="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="secondary"
+                      aria-label="下一张"
+                      onClick={() => stepPreview(1)}
+                      className="absolute right-2.5 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-background/85 shadow-sm backdrop-blur-xs hover:bg-background"
+                    >
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  </>
+                )}
+                <FadeImage
+                  key={selectedImage.url}
                   src={selectedImage.url}
                   alt={displayName(selectedImage)}
+                  loading="eager"
                   className="max-h-[68vh] max-w-full rounded object-contain"
                 />
               </div>
-              <DialogFooter>
-                <Button type="button" size="sm" onClick={() => void copy(selectedImage.url)}>
-                  <Copy className="size-3.5" />
-                  复制链接
+              <DialogFooter className="sm:justify-between">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    const target = selectedImage
+                    setSelectedImage(null)
+                    void removeOne(target)
+                  }}
+                >
+                  <Trash2 className="size-3.5" />
+                  删除
                 </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <a href={selectedImage.url} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="size-3.5" />
-                    打开原图
-                  </a>
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" size="sm" onClick={() => void copy(selectedImage.url)}>
+                    <Copy className="size-3.5" />
+                    复制链接
+                  </Button>
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={selectedImage.url} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="size-3.5" />
+                      打开原图
+                    </a>
+                  </Button>
+                </div>
               </DialogFooter>
             </>
           )}

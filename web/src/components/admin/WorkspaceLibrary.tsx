@@ -12,9 +12,11 @@ import {
 import type { NoticeType } from '@/shared/notify'
 import { formatSize } from '@/shared/format'
 import { useCopy } from '@/shared/useCopy'
+import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import type { WorkspaceAsset, WorkspaceFolder, WorkspaceUser } from '@/shared/workspaceApi'
 import { workspaceApi } from '@/shared/workspaceApi'
 import { useConfirmDialog } from '@/components/ConfirmDialog'
+import { FadeImage } from '@/components/FadeImage'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -53,11 +55,14 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
   const [cursor, setCursor] = useState('')
   const [selected, setSelected] = useState('')
   const [loadingImages, setLoadingImages] = useState(true)
+  const [hasLoadedImages, setHasLoadedImages] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
   const [action, setAction] = useState<'upload' | 'folder' | ''>('')
   const [token, setToken] = useState('')
   const [tokenBusy, setTokenBusy] = useState(false)
   const [accountError, setAccountError] = useState('')
   const [libraryError, setLibraryError] = useState('')
+  const showInitialSkeleton = useDelayedLoading(!me)
 
   const imageRequestRef = useRef(0)
   const accountRequestRef = useRef(0)
@@ -112,7 +117,6 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
     const request = ++imageRequestRef.current
     const reqCursor = more ? cursorRef.current : ''
     if (!more) {
-      setImages([])
       setCursor('')
     }
     setLoadingImages(true)
@@ -122,6 +126,7 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
       if (request !== imageRequestRef.current) return
       setImages(prev => (more ? [...prev, ...data.items] : data.items))
       setCursor(data.next_cursor)
+      setHasLoadedImages(true)
     } catch (err) {
       if (request === imageRequestRef.current) {
         setLibraryError(err instanceof Error ? err.message : '无法加载图片')
@@ -178,11 +183,8 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
     }
   }
 
-  async function upload(event: React.FormEvent) {
-    event.preventDefault()
-    const input = uploadInputRef.current
-    if (!input?.files?.length) return
-    const files = Array.from(input.files)
+  async function uploadFiles(files: File[]) {
+    if (!files.length || action) return
     const destination = uploadFolder
     setAction('upload')
     let completed = 0
@@ -197,7 +199,7 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
         }
       }
       if (completed > 0) {
-        input.value = ''
+        if (uploadInputRef.current) uploadInputRef.current.value = ''
         setSelected('')
         if (folderFilter !== null && folderFilter !== destination) {
           selectFolder(destination)
@@ -210,6 +212,13 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
     } finally {
       setAction('')
     }
+  }
+
+  async function upload(event: React.FormEvent) {
+    event.preventDefault()
+    const input = uploadInputRef.current
+    if (!input?.files?.length) return
+    await uploadFiles(Array.from(input.files))
   }
 
   async function changeToken(revoke: boolean) {
@@ -252,8 +261,9 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
   }
 
   if (!me) {
+    if (!showInitialSkeleton) return <div className="min-h-[420px]" aria-busy="true" />
     return (
-      <div className="space-y-4">
+      <div className="panel-enter space-y-4">
         <Skeleton className="h-20 rounded-xl" />
         <Skeleton className="h-96 rounded-xl" />
       </div>
@@ -261,7 +271,7 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
   }
 
   return (
-    <div className="space-y-5">
+    <div className="panel-enter space-y-5">
       {confirmDialog}
 
       {isAdmin && (
@@ -388,14 +398,40 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
             </Card>
 
             <div className="min-w-0 space-y-4">
-              <Card>
-                <CardHeader>
+              <Card className="relative overflow-hidden">
+                {loadingImages && <div className="loading-bar absolute inset-x-0 top-0" aria-hidden="true" />}
+                <CardHeader className="flex flex-row items-center justify-between gap-2">
                   <CardTitle className="text-base">
                     {folderFilter === null ? '全部图片' : folderFilter || '根目录'}
                   </CardTitle>
+                  {hasLoadedImages && (
+                    <Badge variant="outline" className="font-mono text-[11px] font-normal tabular-nums">
+                      {images.length} 张
+                    </Badge>
+                  )}
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <form onSubmit={upload} className="grid gap-3 rounded-lg border bg-muted/30 p-3 sm:grid-cols-[160px_1fr_auto] sm:items-end">
+                  <form
+                    onSubmit={upload}
+                    onDragOver={event => {
+                      event.preventDefault()
+                      if (!action) setDragActive(true)
+                    }}
+                    onDragLeave={event => {
+                      const next = event.relatedTarget as Node | null
+                      if (next && event.currentTarget.contains(next)) return
+                      setDragActive(false)
+                    }}
+                    onDrop={event => {
+                      event.preventDefault()
+                      setDragActive(false)
+                      if (action || !event.dataTransfer?.files?.length) return
+                      void uploadFiles(Array.from(event.dataTransfer.files))
+                    }}
+                    className={`grid gap-3 rounded-lg border border-dashed p-3 transition-[border-color,background-color] duration-150 sm:grid-cols-[160px_1fr_auto] sm:items-end ${
+                      dragActive ? 'border-foreground bg-muted/70' : 'border-border bg-muted/25'
+                    }`}
+                  >
                     <div className="space-y-1.5">
                       <Label className="text-xs">目标目录</Label>
                       <Select
@@ -415,7 +451,9 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                       </Select>
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="ws-upload-file" className="text-xs">选择原图</Label>
+                      <Label htmlFor="ws-upload-file" className="text-xs">
+                        {dragActive ? '松开即可上传到当前目标目录' : '选择或拖拽原图'}
+                      </Label>
                       <Input
                         id="ws-upload-file"
                         ref={uploadInputRef}
@@ -442,10 +480,10 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
 
                   {images.length === 0 ? (
                     <p className="py-10 text-center text-sm text-muted-foreground" role="status">
-                      {loadingImages ? '正在加载图片...' : '此目录还没有图片'}
+                      {loadingImages ? '正在加载图片...' : '此目录还没有图片，可拖拽或点击上方上传'}
                     </p>
                   ) : (
-                    <ul className="divide-y rounded-lg border">
+                    <ul className={`divide-y rounded-lg border transition-opacity duration-200 ${loadingImages ? 'opacity-60' : 'opacity-100'}`}>
                       {images.map(image => {
                         const originalID = image.image_id || image.id
                         const isSelected = selected === originalID
@@ -453,29 +491,43 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                         return (
                           <li
                             key={image.id}
-                            className={`flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 transition-colors ${
-                              isSelected ? 'bg-muted/70' : 'hover:bg-muted/30'
+                            className={`flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 transition-colors duration-150 ${
+                              isSelected ? 'bg-muted/75' : 'hover:bg-muted/35'
                             }`}
                           >
-                            <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 flex-1 items-center gap-3">
                               <button
                                 type="button"
-                                aria-expanded={isSelected}
                                 onClick={() => selectImage(image)}
-                                className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-4 hover:underline cursor-pointer"
+                                aria-label={`查看 ${image.filename} 详情`}
+                                className="checker-well size-11 shrink-0 overflow-hidden rounded-md border transition-transform duration-150 hover:scale-105 cursor-pointer"
                               >
-                                {image.filename}
+                                <FadeImage
+                                  src={image.url}
+                                  alt={image.filename}
+                                  className="h-full w-full object-cover"
+                                />
                               </button>
-                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                                <Badge variant={image.image_id ? 'outline' : 'secondary'} className="text-[10px] py-0">
-                                  {image.legacy ? '旧图' : image.image_id ? '预生成版本' : '原图'}
-                                </Badge>
-                                <span className="font-mono">{image.folder || '根目录'}</span>
-                                <span>·</span>
-                                <span className="font-mono tabular-nums">{formatSize(image.size_bytes)}</span>
+                              <div className="min-w-0 flex-1">
+                                <button
+                                  type="button"
+                                  aria-expanded={isSelected}
+                                  onClick={() => selectImage(image)}
+                                  className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-4 hover:underline cursor-pointer"
+                                >
+                                  {image.filename}
+                                </button>
+                                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                                  <Badge variant={image.image_id ? 'outline' : 'secondary'} className="text-[10px] py-0">
+                                    {image.legacy ? '旧图' : image.image_id ? '预生成版本' : '原图'}
+                                  </Badge>
+                                  <span className="font-mono">{image.folder || '根目录'}</span>
+                                  <span>·</span>
+                                  <span className="font-mono tabular-nums">{formatSize(image.size_bytes)}</span>
+                                </div>
                               </div>
                             </div>
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap gap-1.5">
                               {webpURL !== image.url && (
                                 <Button type="button" size="xs" variant="outline" onClick={() => void copy(image.url)}>
                                   <Copy className="size-3" />
@@ -518,6 +570,7 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                   id={selected}
                   folders={folders}
                   onNotice={onNotice}
+                  onClose={() => setSelected('')}
                   onRemoved={() => {
                     setSelected('')
                     void Promise.all([loadImages(owner, folderFilter, false), loadAccounts()])

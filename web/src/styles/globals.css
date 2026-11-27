@@ -3,6 +3,17 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Smooth cross-document navigation between /, /admin/*, /admin/index, etc. */
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @theme inline {
   --font-sans: "Inter", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace;
@@ -33,50 +44,50 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* Strictly monochrome neutral palette (shadcn/ui neutral tokens) */
+/* Monochrome Darkroom Contact-Sheet palette — exact hex parity with inline <head> critical CSS */
 :root {
-  --radius: 0.5rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.145 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.965 0 0);
-  --secondary-foreground: oklch(0.145 0 0);
-  --muted: oklch(0.965 0 0);
-  --muted-foreground: oklch(0.49 0 0);
-  --accent: oklch(0.955 0 0);
-  --accent-foreground: oklch(0.145 0 0);
-  --destructive: oklch(0.205 0 0);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.9 0 0);
-  --input: oklch(0.88 0 0);
-  --ring: oklch(0.145 0 0);
+  --radius: 0.625rem;
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #0a0a0a;
+  --primary-foreground: #fafafa;
+  --secondary: #f5f5f4;
+  --secondary-foreground: #0a0a0a;
+  --muted: #f5f5f4;
+  --muted-foreground: #666664;
+  --accent: #f0f0ee;
+  --accent-foreground: #0a0a0a;
+  --destructive: #1a1a1a;
+  --destructive-foreground: #fafafa;
+  --border: #e6e6e4;
+  --input: #dededc;
+  --ring: #0a0a0a;
 }
 
 .dark {
-  --background: oklch(0.115 0 0);
-  --foreground: oklch(0.975 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.975 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.975 0 0);
-  --primary: oklch(0.975 0 0);
-  --primary-foreground: oklch(0.115 0 0);
-  --secondary: oklch(0.205 0 0);
-  --secondary-foreground: oklch(0.975 0 0);
-  --muted: oklch(0.205 0 0);
-  --muted-foreground: oklch(0.68 0 0);
-  --accent: oklch(0.23 0 0);
-  --accent-foreground: oklch(0.975 0 0);
-  --destructive: oklch(0.92 0 0);
-  --destructive-foreground: oklch(0.115 0 0);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.85 0 0);
+  --background: #0a0a0a;
+  --foreground: #f7f7f5;
+  --card: #121212;
+  --card-foreground: #f7f7f5;
+  --popover: #141414;
+  --popover-foreground: #f7f7f5;
+  --primary: #f7f7f5;
+  --primary-foreground: #0a0a0a;
+  --secondary: #1c1c1c;
+  --secondary-foreground: #f7f7f5;
+  --muted: #1a1a1a;
+  --muted-foreground: #9a9a98;
+  --accent: #222222;
+  --accent-foreground: #f7f7f5;
+  --destructive: #ececea;
+  --destructive-foreground: #0a0a0a;
+  --border: rgba(255, 255, 255, 0.11);
+  --input: rgba(255, 255, 255, 0.15);
+  --ring: #e5e5e3;
 }
 
 @layer base {
@@ -85,9 +96,17 @@
   }
 
   html {
+    background-color: var(--background);
+    color: var(--foreground);
+    color-scheme: light;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  html.dark {
+    color-scheme: dark;
   }
 
   body {
@@ -96,56 +115,182 @@
   }
 }
 
-/* Signature viewfinder corner ticks for the contact-sheet upload canvas */
-.viewfinder-frame {
-  position: relative;
+/* Smooth theme toggle fallback when startViewTransition is unavailable */
+html.theme-transitioning,
+html.theme-transitioning *,
+html.theme-transitioning *::before,
+html.theme-transitioning *::after {
+  transition:
+    background-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    fill 180ms ease,
+    stroke 180ms ease !important;
 }
 
-.viewfinder-frame::before,
-.viewfinder-frame::after {
+/* Motion keyframes */
+@keyframes ei-view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ei-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ei-bar-grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes ei-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.view-enter {
+  animation: ei-view-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.panel-enter {
+  animation: ei-panel-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.bar-grow {
+  transform-origin: bottom;
+  animation: ei-bar-grow 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.loading-bar {
+  position: relative;
+  overflow: hidden;
+  height: 2px;
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.loading-bar::after {
   content: "";
+  position: absolute;
+  inset: 0;
+  width: 38%;
+  background: var(--foreground);
+  animation: ei-indeterminate 1.05s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Signature 4-corner optical viewfinder for the contact-sheet upload canvas */
+.viewfinder-frame {
+  position: relative;
+  background-image: radial-gradient(color-mix(in srgb, var(--foreground) 7%, transparent) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.viewfinder-corner {
   position: absolute;
   pointer-events: none;
   width: 14px;
   height: 14px;
   border-color: var(--foreground);
-  opacity: 0.28;
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  opacity: 0.24;
+  transition: opacity 220ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.viewfinder-frame::before {
-  top: 12px;
-  left: 12px;
+.viewfinder-corner-tl {
+  top: 14px;
+  left: 14px;
   border-top: 1.5px solid;
   border-left: 1.5px solid;
 }
 
-.viewfinder-frame::after {
-  right: 12px;
-  bottom: 12px;
+.viewfinder-corner-tr {
+  top: 14px;
+  right: 14px;
+  border-top: 1.5px solid;
   border-right: 1.5px solid;
+}
+
+.viewfinder-corner-bl {
+  bottom: 14px;
+  left: 14px;
   border-bottom: 1.5px solid;
+  border-left: 1.5px solid;
 }
 
-.viewfinder-frame:hover::before,
-.viewfinder-frame[data-active="true"]::before {
-  opacity: 0.85;
-  transform: translate(2px, 2px);
+.viewfinder-corner-br {
+  bottom: 14px;
+  right: 14px;
+  border-bottom: 1.5px solid;
+  border-right: 1.5px solid;
 }
 
-.viewfinder-frame:hover::after,
-.viewfinder-frame[data-active="true"]::after {
+.viewfinder-frame:hover .viewfinder-corner,
+.viewfinder-frame[data-active="true"] .viewfinder-corner {
   opacity: 0.85;
-  transform: translate(-2px, -2px);
+}
+
+.viewfinder-frame:hover .viewfinder-corner-tl,
+.viewfinder-frame[data-active="true"] .viewfinder-corner-tl {
+  transform: translate(3px, 3px);
+}
+
+.viewfinder-frame:hover .viewfinder-corner-tr,
+.viewfinder-frame[data-active="true"] .viewfinder-corner-tr {
+  transform: translate(-3px, 3px);
+}
+
+.viewfinder-frame:hover .viewfinder-corner-bl,
+.viewfinder-frame[data-active="true"] .viewfinder-corner-bl {
+  transform: translate(3px, -3px);
+}
+
+.viewfinder-frame:hover .viewfinder-corner-br,
+.viewfinder-frame[data-active="true"] .viewfinder-corner-br {
+  transform: translate(-3px, -3px);
 }
 
 /* Monochrome subtle dot grid for lightbox / image preview wells */
 .checker-well {
   background-color: var(--muted);
-  background-image: radial-gradient(color-mix(in oklch, var(--foreground) 12%, transparent) 1px, transparent 1px);
+  background-image: radial-gradient(color-mix(in srgb, var(--foreground) 12%, transparent) 1px, transparent 1px);
   background-size: 14px 14px;
 }
 
 cap-widget {
   display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
 }

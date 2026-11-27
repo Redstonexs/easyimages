@@ -5,11 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>安装 - EasyImage</title>
     <link rel="icon" href="{{.config.SiteIcon}}">
-    <script>(function(){try{var t=localStorage.getItem('easyimage-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})();</script>
+    <meta name="color-scheme" content="light dark">
+    <script>(function(){try{var t=localStorage.getItem('easyimage-theme');var d=t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;if(d){r.classList.add('dark');r.style.colorScheme='dark'}else{r.style.colorScheme='light'}}catch(e){}})();</script>
     <style>
-        :root { --bg:#ffffff; --fg:#0a0a0a; --card:#ffffff; --muted-fg:#6b6b6b; --border:#e5e5e5; }
-        .dark { --bg:#0f0f0f; --fg:#fafafa; --card:#161616; --muted-fg:#a3a3a3; --border:rgba(255,255,255,0.12); }
+        @view-transition { navigation: auto; }
+        ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 200ms; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); }
+        :root { --bg:#ffffff; --fg:#0a0a0a; --card:#ffffff; --muted-fg:#666664; --border:#e6e6e4; }
+        html { background: var(--bg); color: var(--fg); color-scheme: light; }
+        html.dark { --bg:#0a0a0a; --fg:#f7f7f5; --card:#121212; --muted-fg:#9a9a98; --border:rgba(255,255,255,0.11); color-scheme: dark; }
         * { box-sizing: border-box; }
+        @keyframes ei-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         body {
             margin: 0;
             min-height: 100vh;
@@ -24,11 +29,13 @@
         .card {
             width: 100%;
             max-width: 440px;
-            padding: 28px;
+            padding: 30px;
             border: 1px solid var(--border);
-            border-radius: 12px;
+            border-radius: 14px;
             background: var(--card);
+            animation: ei-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
         }
+        @media (prefers-reduced-motion: reduce) { .card { animation: none; } }
         .brand { display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; margin-bottom:18px; }
         .brand-mark { display:grid; place-items:center; width:24px; height:24px; border-radius:6px; background:var(--fg); color:var(--bg); font-size:11px; font-weight:700; }
         h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Database,
   Files,
@@ -6,6 +6,7 @@ import {
   Image as ImageIcon,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Save,
   Tag,
   Upload
@@ -14,6 +15,7 @@ import type { AdminConfig as AdminConfigType, AdminOverview } from '@/types'
 import type { NoticeType } from '@/shared/notify'
 import { adminApi } from '@/shared/adminApi'
 import { normalizeStorageSources, validateStorageSources } from '@/shared/storageSources'
+import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -39,6 +41,7 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
   const [config, setConfig] = useState<AdminConfigType | null>(null)
   const [snapshot, setSnapshot] = useState('')
   const siteIconInputRef = useRef<HTMLInputElement>(null)
+  const showSkeleton = useDelayedLoading(loading)
 
   const isDirty = useMemo(() => {
     if (!config || !snapshot) return false
@@ -89,9 +92,9 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
     setConfig(prev => (prev ? { ...prev, [key]: value } : prev))
   }
 
-  async function save(event?: React.FormEvent) {
+  const save = useCallback(async (event?: React.FormEvent) => {
     event?.preventDefault()
-    if (!config) return
+    if (!config || saving) return
     const normalizedSources = normalizeStorageSources(config.storage_sources)
     const nextConfig: AdminConfigType = { ...config, storage_sources: normalizedSources }
     const storageErrors = validateStorageSources(normalizedSources, nextConfig.default_storage_source)
@@ -111,7 +114,28 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
     } finally {
       setSaving(false)
     }
+  }, [config, saving, onNotice])
+
+  function resetChanges() {
+    if (!snapshot) return
+    try {
+      setConfig(JSON.parse(snapshot) as AdminConfigType)
+      onNotice('已还原未保存的更改', 'info')
+    } catch {
+      // Ignore malformed snapshot.
+    }
   }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        void save()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [save])
 
   async function batchWebP() {
     setConverting(true)
@@ -158,9 +182,10 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
   }
 
   if (loading) {
+    if (!showSkeleton) return <div className="min-h-[420px]" aria-busy="true" />
     return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-4">
+      <div className="panel-enter space-y-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Skeleton className="h-24 rounded-xl" />
           <Skeleton className="h-24 rounded-xl" />
           <Skeleton className="h-24 rounded-xl" />
@@ -173,7 +198,7 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
   if (!config) return null
 
   return (
-    <form onSubmit={save} className="space-y-6 pb-20">
+    <form onSubmit={save} className="panel-enter space-y-6 pb-20">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Card className="gap-1 py-4">
           <CardContent className="flex items-center justify-between">
@@ -713,14 +738,29 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
       </Tabs>
 
       {/* Sticky action bar */}
-      <div className="sticky bottom-4 z-30 flex items-center justify-between gap-3 rounded-xl border bg-card/95 px-4 py-3 shadow-md backdrop-blur-md">
-        <p className="text-xs text-muted-foreground">
-          {isDirty ? '检测到配置已修改，请保存以生效。' : '当前所有配置均已同步保存。'}
-        </p>
-        <Button type="submit" disabled={saving}>
-          {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-          {saving ? '保存中...' : '保存配置'}
-        </Button>
+      <div
+        className={`sticky bottom-4 z-30 flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 backdrop-blur-md transition-[border-color,box-shadow,background-color] duration-200 ${
+          isDirty
+            ? 'border-foreground/30 bg-card/95 shadow-lg'
+            : 'border-border/80 bg-card/90 shadow-sm'
+        }`}
+      >
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {isDirty && <span className="size-1.5 rounded-full bg-foreground" />}
+          <span>{isDirty ? '检测到配置已修改，按 Ctrl+S 或点击保存生效。' : '当前所有配置均已同步保存。'}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {isDirty && (
+            <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={resetChanges}>
+              <RotateCcw className="size-3.5" />
+              还原更改
+            </Button>
+          )}
+          <Button type="submit" size="sm" disabled={saving}>
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            {saving ? '保存中...' : '保存配置'}
+          </Button>
+        </div>
       </div>
     </form>
   )
