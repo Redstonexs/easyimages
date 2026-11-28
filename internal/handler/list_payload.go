@@ -4,6 +4,8 @@ import (
 	"easyimage/config"
 	"easyimage/internal/service"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -97,7 +99,7 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 		if !service.IsImageFile(name) {
 			continue
 		}
-		if ext != "" && !strings.EqualFold(strings.TrimPrefix(name[strings.LastIndex(name, "."):], "."), ext) {
+		if ext != "" && !strings.EqualFold(strings.TrimPrefix(filepath.Ext(name), "."), ext) {
 			continue
 		}
 		if query != "" && !service.MetadataMatchesQuery(metadata, name, query) {
@@ -108,15 +110,16 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 			continue
 		}
 		relativePath := metadata.Path
+		querySafePath := escapeQueryPath(relativePath)
 		files = append(files, imageListFile{
 			Name:         name,
 			OriginalName: metadata.OriginalName,
 			Path:         relativePath,
-			URL:          imageURLForMetadata(cfg, relativePath, metadata),
+			URL:          imageURLForMetadata(cfg, (&url.URL{Path: relativePath}).EscapedPath(), metadata),
 			ThumbURL:     thumbURLForMetadata(relativePath, metadata),
 			WebPURL:      service.GetWebPURL(relativePath, cfg),
-			InfoURL:      "/app/info?img=" + relativePath,
-			DownURL:      "/app/down?dw=" + relativePath,
+			InfoURL:      "/app/info?img=" + querySafePath,
+			DownURL:      "/app/down?dw=" + querySafePath,
 		})
 	}
 
@@ -144,14 +147,15 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 		if len(files) >= limit {
 			continue
 		}
+		querySafePath := escapeQueryPath(relativePath)
 		files = append(files, imageListFile{
 			Name:     name,
 			Path:     relativePath,
-			URL:      cfg.Domain + relativePath,
-			ThumbURL: "/app/thumb?img=" + relativePath,
+			URL:      strings.TrimRight(cfg.Domain, "/") + (&url.URL{Path: relativePath}).EscapedPath(),
+			ThumbURL: "/app/thumb?img=" + querySafePath,
 			WebPURL:  service.GetWebPURL(relativePath, cfg),
-			InfoURL:  "/app/info?img=" + relativePath,
-			DownURL:  "/app/down?dw=" + relativePath,
+			InfoURL:  "/app/info?img=" + querySafePath,
+			DownURL:  "/app/down?dw=" + querySafePath,
 		})
 	}
 	yesterday := time.Now().AddDate(0, 0, -1).Format("2006/01/02/")
@@ -180,18 +184,24 @@ func imageListPayload(c *gin.Context, cfg *config.Config) (imageListPayloadData,
 	}, nil
 }
 
+func escapeQueryPath(p string) string {
+	escaped := (&url.URL{Path: p}).EscapedPath()
+	escaped = strings.ReplaceAll(escaped, "&", "%26")
+	return strings.ReplaceAll(escaped, "+", "%2B")
+}
+
 func imageURLForMetadata(cfg *config.Config, relativePath string, metadata service.ImageMetadata) string {
 	if metadata.URL != "" {
 		return metadata.URL
 	}
-	return cfg.Domain + relativePath
+	return strings.TrimRight(cfg.Domain, "/") + relativePath
 }
 
 func thumbURLForMetadata(relativePath string, metadata service.ImageMetadata) string {
 	if metadata.ThumbURL != "" {
 		return metadata.ThumbURL
 	}
-	return "/app/thumb?img=" + relativePath
+	return "/app/thumb?img=" + escapeQueryPath(relativePath)
 }
 
 func isSafeListExtension(ext string) bool {

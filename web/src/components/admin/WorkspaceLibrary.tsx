@@ -12,12 +12,16 @@ import {
   LayoutGrid,
   List,
   Loader2,
+  Search,
+  Trash2,
   Upload,
   X
 } from 'lucide-react'
 import type { NoticeType } from '@/shared/notify'
+import { adminApi } from '@/shared/adminApi'
+import { runBatchDelete, summarizeBatchDelete } from '@/shared/batchDelete'
 import { formatSize } from '@/shared/format'
-import { fetchCached, getCached, invalidateCached } from '@/shared/swrCache'
+import { fetchCached, getCached, invalidateCached, prefetchCached } from '@/shared/swrCache'
 import { useCopy } from '@/shared/useCopy'
 import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import type { WorkspaceAsset, WorkspaceFolder, WorkspaceUser } from '@/shared/workspaceApi'
@@ -28,6 +32,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -35,6 +40,7 @@ import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import AdminFiler from '@/components/admin/AdminFiler'
 import WorkspaceAdmin from '@/components/admin/WorkspaceAdmin'
 import WorkspaceImageDetail from '@/components/admin/WorkspaceImageDetail'
 
@@ -100,13 +106,25 @@ function workspaceThumbURL(image: WorkspaceAsset): string {
   }
   try {
     const parsed = new URL(image.url, window.location.href)
-    if (parsed.origin === window.location.origin && parsed.pathname.startsWith('/i/')) {
-      return `/app/thumb?img=${encodeURIComponent(decodeURIComponent(parsed.pathname))}`
+    if (parsed.origin === window.location.origin) {
+      const sourcePath = image.legacy_path || decodeURIComponent(parsed.pathname)
+      return `/app/thumb?img=${encodeURIComponent(sourcePath)}`
     }
   } catch {
     // Fall back to direct URL if parsing/decoding fails.
   }
   return image.url
+}
+
+function readInitialSection(isAdmin: boolean): 'library' | 'files' | 'admin' {
+  if (!isAdmin || typeof window === 'undefined') return 'library'
+  const tab = new URLSearchParams(window.location.search).get('tab')
+  if (tab === 'files' || tab === 'admin') return tab
+  return 'library'
+}
+
+function canDeleteAsset(asset: WorkspaceAsset, isAdmin: boolean): boolean {
+  return !asset.legacy || (isAdmin && Boolean(asset.legacy_path))
 }
 
 function imagesCacheKey(targetOwner: string, targetFolder: string | null) {
@@ -141,7 +159,7 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
   const [me, setMe] = useState<WorkspaceUser | undefined>(cachedMe)
   const [users, setUsers] = useState<WorkspaceUser[]>(cachedUsers ?? [])
   const [owner, setOwner] = useState(initialOwner)
-  const [section, setSection] = useState<'library' | 'admin'>('library')
+  const [section, setSection] = useState<'library' | 'files' | 'admin'>(() => readInitialSection(isAdmin))
   const [folderFilter, setFolderFilter] = useState<string | null>(null)
   const [folders, setFolders] = useState<WorkspaceFolder[]>(cachedFolders ?? [])
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
@@ -153,11 +171,13 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
   const [images, setImages] = useState<WorkspaceAsset[]>(cachedImagesData?.items ?? [])
   const [cursor, setCursor] = useState(cachedImagesData?.next_cursor ?? '')
   const [selected, setSelected] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'grid'>(readInitialViewMode)
   const [loadingImages, setLoadingImages] = useState(!cachedImagesData)
   const [hasLoadedImages, setHasLoadedImages] = useState(Boolean(cachedImagesData))
   const [dragActive, setDragActive] = useState(false)
-  const [action, setAction] = useState<'upload' | 'folder' | ''>('')
+  const [action, setAction] = useState<'upload' | 'folder' | 'delete' | ''>('')
   const [token, setToken] = useState('')
   const [tokenBusy, setTokenBusy] = useState(false)
   const [accountError, setAccountError] = useState('')
@@ -182,6 +202,89 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
     if (!activeAccount?.quota_bytes) return 0
     return Math.min(100, Math.round((activeAccount.used_bytes / activeAccount.quota_bytes) * 100))
   }, [activeAccount])
+
+  const filteredImages = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return images
+    return images.filter(item =>
+      item.filename.toLowerCase().includes(query) ||
+      item.folder.toLowerCase().includes(query)
+    )
+  }, [images, searchQuery])
+
+  const selectedAssets = useMemo(
+    () => filteredImages.filter(item => selectedIds.has(item.id)),
+    [filteredImages, selectedIds]
+  )
+  const deletableSelected = useMemo(
+    () => selectedAssets.filter(item => canDeleteAsset(item, isAdmin)),
+    [selectedAssets, isAdmin]
+  )
+  const allFilteredSelected = filteredImages.length > 0 && selectedAssets.length === filteredImages.length
+
+  const selectedOriginalImages = useMemo(() => {
+    const seen = new Set<string>()
+    const list: WorkspaceAsset[] = []
+    for (const item of filteredImages) {
+      const detailID = item.image_id || item.id
+      if (seen.has(detailID)) continue
+      seen.add(detailID)
+      list.push(item)
+    }
+    return list
+  }, [filteredImages])
+
+  const selectedDetailIndex = useMemo(() => {
+    if (!selected) return -1
+    return selectedOriginalImages.findIndex(item => (item.image_id || item.id) === selected)
+  }, [selected, selectedOriginalImages])
+
+  const stepSelectedDetail = useCallback((delta: number) => {
+    if (selectedOriginalImages.length <= 1 || selectedDetailIndex < 0) return
+    const nextIdx = (selectedDetailIndex + delta + selectedOriginalImages.length) % selectedOriginalImages.length
+    const next = selectedOriginalImages[nextIdx]
+    setSelected(next.image_id || next.id)
+  }, [selectedOriginalImages, selectedDetailIndex])
+
+  useEffect(() => {
+    if (!selected || selectedOriginalImages.length <= 1) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) {
+        return
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        stepSelectedDetail(-1)
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        stepSelectedDetail(1)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selected, selectedOriginalImages.length, stepSelectedDetail])
+
+  function changeSection(next: 'library' | 'files' | 'admin') {
+    if (action) return
+    setSection(next)
+    if (!isAdmin || typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (next === 'library') url.searchParams.delete('tab')
+    else url.searchParams.set('tab', next)
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`)
+  }
+
+  function changeOwner(nextOwner: string) {
+    if (nextOwner === owner || action) return
+    setFolderFilter(null)
+    setUploadFolder('')
+    setFolderPath('')
+    setSelected('')
+    setSelectedIds(new Set())
+    setSearchQuery('')
+    setOwner(nextOwner)
+  }
 
   function changeViewMode(next: 'list' | 'grid') {
     setViewMode(next)
@@ -269,16 +372,13 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
 
   useEffect(() => {
     if (!owner) return
-    setFolderFilter(null)
-    setUploadFolder('')
-    setFolderPath('')
-    setSelected('')
     void loadFolders(owner)
   }, [owner, loadFolders])
 
   useEffect(() => {
     if (!owner) return
     setSelected('')
+    setSelectedIds(new Set())
     void loadImages(owner, folderFilter, false)
   }, [owner, folderFilter, loadImages])
 
@@ -311,6 +411,70 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
   function selectImage(asset: WorkspaceAsset) {
     const originalID = asset.image_id || asset.id
     setSelected(originalID)
+  }
+
+  function toggleSelectedId(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAllFiltered() {
+    setSelectedIds(allFilteredSelected ? new Set() : new Set(filteredImages.map(item => item.id)))
+  }
+
+  async function removeSelected() {
+    if (deletableSelected.length === 0 || action) return
+    const totalSize = deletableSelected.reduce((sum, item) => sum + (item.size_bytes || 0), 0)
+    const ok = await confirm({
+      title: `批量删除 ${deletableSelected.length} 张图片？`,
+      description: `总计 ${formatSize(totalSize)}，删除原图会同时清理关联版本与副本，此操作不可恢复。`,
+      confirmLabel: '确认批量删除'
+    })
+    if (!ok) return
+
+    setAction('delete')
+    try {
+      const byId = new Map(deletableSelected.map(item => [item.id, item]))
+      const outcome = await runBatchDelete(
+        deletableSelected.map(item => item.id),
+        async id => {
+          const item = byId.get(id)!
+          if (item.legacy) {
+            if (!item.legacy_path) return { code: 400, msg: '缺少旧图路径' }
+            return await adminApi.deleteFile(item.legacy_path)
+          }
+          if (item.image_id) {
+            await workspaceApi.deleteVariant(item.image_id, item.id)
+          } else {
+            await workspaceApi.deleteImage(item.id)
+          }
+          return { code: 200, msg: '删除成功' }
+        }
+      )
+      const deletedSet = new Set(outcome.succeeded)
+      if (deletedSet.size > 0) {
+        invalidateCached(`ws:images:${owner}:`)
+        invalidateCached(`ws:folders:${owner}`)
+        invalidateCached('ws:me')
+        if (deletableSelected.some(item => item.legacy && deletedSet.has(item.id))) {
+          invalidateCached('admin:filer:')
+          invalidateCached('admin:history:')
+          invalidateCached('admin:chart')
+          invalidateCached('admin:overview')
+        }
+        setImages(prev => prev.filter(item => !deletedSet.has(item.id)))
+        setSelectedIds(prev => new Set([...prev].filter(id => !deletedSet.has(id))))
+        void Promise.all([loadImages(owner, folderFilter, false, true), loadAccounts(true)])
+      }
+      const summary = summarizeBatchDelete(outcome)
+      onNotice(summary.message, summary.type)
+    } finally {
+      setAction('')
+    }
   }
 
   async function createFolder(event: React.FormEvent) {
@@ -486,9 +650,16 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
       {confirmDialog}
 
       {isAdmin && (
-        <Tabs value={section} onValueChange={v => { if (!action) setSection(v as 'library' | 'admin') }}>
+        <Tabs value={section} onValueChange={v => changeSection(v as 'library' | 'files' | 'admin')}>
           <TabsList>
             <TabsTrigger value="library">图片与目录</TabsTrigger>
+            <TabsTrigger
+              value="files"
+              onMouseEnter={() => prefetchCached('admin:filer:', () => adminApi.filer(new URLSearchParams()))}
+              onFocus={() => prefetchCached('admin:filer:', () => adminApi.filer(new URLSearchParams()))}
+            >
+              本地文件
+            </TabsTrigger>
             <TabsTrigger value="admin">租户与公开链接</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -509,6 +680,17 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
             void loadImages(owner, folderFilter, false, true)
           }}
         />
+      ) : section === 'files' && isAdmin ? (
+        <AdminFiler
+          onNotice={onNotice}
+          onFilesChanged={() => {
+            invalidateCached('ws:images:admin:')
+            invalidateCached('ws:folders:admin')
+            if (owner === 'admin') {
+              void Promise.all([loadFolders('admin', true), loadImages('admin', folderFilter, false, true)])
+            }
+          }}
+        />
       ) : (
         <>
           {activeAccount && (
@@ -517,7 +699,7 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                 {isAdmin ? (
                   <div className="flex items-center gap-3">
                     <Label className="shrink-0 text-xs text-muted-foreground">查看账号</Label>
-                    <Select value={owner} onValueChange={setOwner} disabled={Boolean(action)}>
+                    <Select value={owner} onValueChange={changeOwner} disabled={Boolean(action)}>
                       <SelectTrigger className="h-8 w-52 text-xs">
                         <SelectValue />
                       </SelectTrigger>
@@ -641,45 +823,76 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                 {loadingImages && <div className="loading-bar absolute inset-x-0 top-0" aria-hidden="true" />}
                 <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
+                    {filteredImages.length > 0 && (
+                      <Checkbox
+                        checked={allFilteredSelected}
+                        aria-label="全选当前图片"
+                        onCheckedChange={toggleAllFiltered}
+                      />
+                    )}
                     <CardTitle className="text-base">
                       {folderFilter === null ? '全部图片' : folderFilter || '根目录'}
                     </CardTitle>
                     {hasLoadedImages && (
                       <Badge variant="outline" className="font-mono text-[11px] font-normal tabular-nums">
-                        {images.length} 张
+                        {searchQuery.trim() ? `${filteredImages.length} / ${images.length}` : `${images.length}`} 张
                       </Badge>
                     )}
                   </div>
 
-                  <div className="inline-flex items-center rounded-md border bg-muted/40 p-0.5" role="group" aria-label="视图模式">
-                    <button
-                      type="button"
-                      onClick={() => changeViewMode('grid')}
-                      aria-pressed={viewMode === 'grid'}
-                      title="网格视图"
-                      className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors cursor-pointer ${
-                        viewMode === 'grid'
-                          ? 'bg-background font-medium text-foreground shadow-2xs'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <LayoutGrid className="size-3.5" />
-                      <span className="hidden sm:inline">网格</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => changeViewMode('list')}
-                      aria-pressed={viewMode === 'list'}
-                      title="列表视图"
-                      className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors cursor-pointer ${
-                        viewMode === 'list'
-                          ? 'bg-background font-medium text-foreground shadow-2xs'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <List className="size-3.5" />
-                      <span className="hidden sm:inline">列表</span>
-                    </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative w-40 sm:w-48">
+                      <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        type="search"
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        placeholder="过滤图片名..."
+                        aria-label="过滤当前列表图片"
+                        className="h-7 pl-7 pr-6 text-xs"
+                      />
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          aria-label="清空过滤"
+                          onClick={() => setSearchQuery('')}
+                          className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="inline-flex items-center rounded-md border bg-muted/40 p-0.5" role="group" aria-label="视图模式">
+                      <button
+                        type="button"
+                        onClick={() => changeViewMode('grid')}
+                        aria-pressed={viewMode === 'grid'}
+                        title="网格视图"
+                        className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors cursor-pointer ${
+                          viewMode === 'grid'
+                            ? 'bg-background font-medium text-foreground shadow-2xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <LayoutGrid className="size-3.5" />
+                        <span className="hidden sm:inline">网格</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => changeViewMode('list')}
+                        aria-pressed={viewMode === 'list'}
+                        title="列表视图"
+                        className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors cursor-pointer ${
+                          viewMode === 'list'
+                            ? 'bg-background font-medium text-foreground shadow-2xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <List className="size-3.5" />
+                        <span className="hidden sm:inline">列表</span>
+                      </button>
+                    </div>
                   </div>
                 </CardHeader>
 
@@ -782,38 +995,87 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                     </Alert>
                   )}
 
-                  {images.length === 0 ? (
+                  {selectedAssets.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs">
+                      <span className="font-medium tabular-nums">
+                        已选 {selectedAssets.length} 张 · {formatSize(selectedAssets.reduce((sum, item) => sum + (item.size_bytes || 0), 0))}
+                      </span>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        onClick={() => void copy(selectedAssets.map(item => item.url).join('\n'), `已复制 ${selectedAssets.length} 条链接`)}
+                      >
+                        <Copy className="size-3" />
+                        复制链接
+                      </Button>
+                      {deletableSelected.length > 0 && (
+                        <Button type="button" size="xs" disabled={Boolean(action)} onClick={() => void removeSelected()}>
+                          <Trash2 className="size-3" />
+                          批量删除{deletableSelected.length < selectedAssets.length ? ` (${deletableSelected.length})` : ''}
+                        </Button>
+                      )}
+                      <Button type="button" size="xs" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                        取消选择
+                      </Button>
+                    </div>
+                  )}
+
+                  {filteredImages.length === 0 ? (
                     <p className="py-12 text-center text-sm text-muted-foreground" role="status">
-                      {loadingImages ? '正在加载图片...' : '此目录还没有图片，可拖拽或点击上方上传'}
+                      {loadingImages
+                        ? '正在加载图片...'
+                        : images.length > 0
+                          ? '没有匹配当前筛选词的图片'
+                          : '此目录还没有图片，可拖拽或点击上方上传'}
                     </p>
                   ) : viewMode === 'grid' ? (
                     <div className={`grid grid-cols-2 gap-3 transition-opacity duration-150 sm:grid-cols-3 ${loadingImages ? 'opacity-65' : 'opacity-100'}`}>
-                      {images.map(image => {
+                      {filteredImages.map(image => {
                         const webpURL = image.webp_url
+                        const isChecked = selectedIds.has(image.id)
                         return (
                           <article
                             key={image.id}
-                            className="group flex flex-col overflow-hidden rounded-xl border bg-card transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-sm"
+                            className={`group relative flex flex-col overflow-hidden rounded-xl border bg-card transition-[border-color,box-shadow,transform] duration-200 ${
+                              isChecked ? 'ring-2 ring-foreground' : 'hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-sm'
+                            }`}
                           >
-                            <button
-                              type="button"
-                              onClick={() => selectImage(image)}
-                              aria-label={`查看 ${image.filename} 详情`}
-                              className="checker-well relative block aspect-[4/3] w-full overflow-hidden border-b cursor-pointer"
+                            <div
+                              className="checker-well relative aspect-[4/3] w-full overflow-hidden border-b"
                             >
-                              <FadeImage
-                                src={workspaceThumbURL(image)}
-                                fallbackSrc={image.url}
-                                alt={image.filename}
-                                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-                              />
+                              <div
+                                className={`absolute top-2 right-2 z-10 rounded-md bg-background/90 p-1 shadow-xs backdrop-blur-xs transition-opacity ${
+                                  isChecked ? 'opacity-100' : 'opacity-80 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100'
+                                }`}
+                                onClick={event => event.stopPropagation()}
+                              >
+                                <Checkbox
+                                  checked={isChecked}
+                                  aria-label={`选择 ${image.filename}`}
+                                  onCheckedChange={() => toggleSelectedId(image.id)}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => selectImage(image)}
+                                aria-label={`查看 ${image.filename} 详情`}
+                                className="block h-full w-full cursor-pointer"
+                              >
+                                <FadeImage
+                                  src={workspaceThumbURL(image)}
+                                  fallbackSrc={image.url}
+                                  alt={image.filename}
+                                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                                />
+                              </button>
                               <Badge
                                 variant="secondary"
-                                className="absolute top-2 left-2 bg-background/85 px-1.5 py-0 text-[10px] backdrop-blur-xs"
+                                className="pointer-events-none absolute top-2 left-2 bg-background/85 px-1.5 py-0 text-[10px] backdrop-blur-xs"
                               >
                                 {image.legacy ? '旧图' : image.image_id ? '变体' : '原图'}
                               </Badge>
-                            </button>
+                            </div>
                             <div className="flex flex-1 flex-col justify-between gap-2 p-2.5">
                               <div className="min-w-0">
                                 <button
@@ -855,14 +1117,22 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
                     </div>
                   ) : (
                     <ul className={`divide-y rounded-xl border transition-opacity duration-150 ${loadingImages ? 'opacity-65' : 'opacity-100'}`}>
-                      {images.map(image => {
+                      {filteredImages.map(image => {
                         const webpURL = image.webp_url
+                        const isChecked = selectedIds.has(image.id)
                         return (
                           <li
                             key={image.id}
-                            className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 transition-colors duration-150 hover:bg-muted/35"
+                            className={`flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 transition-colors duration-150 hover:bg-muted/35 ${
+                              isChecked ? 'bg-muted/45' : ''
+                            }`}
                           >
                             <div className="flex min-w-0 flex-1 items-center gap-3">
+                              <Checkbox
+                                checked={isChecked}
+                                aria-label={`选择 ${image.filename}`}
+                                onCheckedChange={() => toggleSelectedId(image.id)}
+                              />
                               <button
                                 type="button"
                                 onClick={() => selectImage(image)}
@@ -932,6 +1202,50 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
               </Card>
             </div>
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <KeyRound className="size-4" />
+                API 访问令牌
+              </CardTitle>
+              <CardDescription>Bearer 令牌拥有当前账号权限，生成后仅显示一次。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" variant="outline" size="sm" disabled={tokenBusy} onClick={() => void changeToken(false)}>
+                  {me.has_token ? '重新生成令牌' : '生成令牌'}
+                </Button>
+                {me.has_token && (
+                  <Button type="button" variant="ghost" size="sm" disabled={tokenBusy} onClick={() => void changeToken(true)}>
+                    撤销令牌
+                  </Button>
+                )}
+                <Button variant="link" size="sm" asChild>
+                  <a href={workspaceApi.openapiURL} target="_blank" rel="noopener noreferrer">
+                    OpenAPI 规范
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                </Button>
+              </div>
+
+              {token && (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={token}
+                    readOnly
+                    aria-label="新 API 令牌"
+                    className="font-mono text-xs bg-muted/40"
+                    onFocus={e => e.currentTarget.select()}
+                  />
+                  <Button type="button" size="sm" onClick={() => void copy(token, '已复制令牌')}>
+                    <Copy className="size-3.5" />
+                    复制令牌
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </>
       )}
 
@@ -948,12 +1262,21 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
               id={selected}
               folders={folders}
               embedded
+              isAdmin={isAdmin}
+              positionLabel={
+                selectedOriginalImages.length > 1 && selectedDetailIndex >= 0
+                  ? `${selectedDetailIndex + 1} / ${selectedOriginalImages.length}`
+                  : undefined
+              }
+              onPrev={selectedOriginalImages.length > 1 ? () => stepSelectedDetail(-1) : undefined}
+              onNext={selectedOriginalImages.length > 1 ? () => stepSelectedDetail(1) : undefined}
               onNotice={onNotice}
               onRemoved={() => {
                 setSelected('')
                 invalidateCached(`ws:images:${owner}:`)
+                invalidateCached(`ws:folders:${owner}`)
                 invalidateCached('ws:me')
-                void Promise.all([loadImages(owner, folderFilter, false, true), loadAccounts(true)])
+                void Promise.all([loadFolders(owner, true), loadImages(owner, folderFilter, false, true), loadAccounts(true)])
               }}
               onChanged={() => {
                 invalidateCached(`ws:images:${owner}:`)
@@ -964,50 +1287,6 @@ export default function WorkspaceLibrary({ isAdmin, maxUploadSize, onNotice }: W
           )}
         </DialogContent>
       </Dialog>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <KeyRound className="size-4" />
-            API 访问令牌
-          </CardTitle>
-          <CardDescription>Bearer 令牌拥有当前账号权限，生成后仅显示一次。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" size="sm" disabled={tokenBusy} onClick={() => void changeToken(false)}>
-              {me.has_token ? '重新生成令牌' : '生成令牌'}
-            </Button>
-            {me.has_token && (
-              <Button type="button" variant="ghost" size="sm" disabled={tokenBusy} onClick={() => void changeToken(true)}>
-                撤销令牌
-              </Button>
-            )}
-            <Button variant="link" size="sm" asChild>
-              <a href={workspaceApi.openapiURL} target="_blank" rel="noopener noreferrer">
-                OpenAPI 规范
-                <ExternalLink className="size-3.5" />
-              </a>
-            </Button>
-          </div>
-
-          {token && (
-            <div className="flex items-center gap-2">
-              <Input
-                value={token}
-                readOnly
-                aria-label="新 API 令牌"
-                className="font-mono text-xs bg-muted/40"
-                onFocus={e => e.currentTarget.select()}
-              />
-              <Button type="button" size="sm" onClick={() => void copy(token, '已复制令牌')}>
-                <Copy className="size-3.5" />
-                复制令牌
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   )
 }

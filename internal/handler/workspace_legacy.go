@@ -471,8 +471,9 @@ func legacyAsset(cfg *config.Config, source, folder, contentType string, size in
 			ID: legacyAssetID(source), OwnerID: workspace.AdminID, Folder: folder,
 			Filename: name, ContentType: contentType, SizeBytes: size, CreatedAt: createdAt,
 		},
-		URL:    imageURLForMetadata(cfg, (&url.URL{Path: source}).EscapedPath(), metadata),
-		Legacy: true,
+		URL:        imageURLForMetadata(cfg, (&url.URL{Path: source}).EscapedPath(), metadata),
+		Legacy:     true,
+		LegacyPath: source,
 	}
 	if strings.EqualFold(path.Ext(source), ".webp") {
 		item.WebPURL = item.URL

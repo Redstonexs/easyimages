@@ -29,6 +29,7 @@ import type { LinkFormat } from '@/shared/uploadFormats'
 import { formatResults, resultName } from '@/shared/uploadFormats'
 import { useCopy } from '@/shared/useCopy'
 import { notifyToast } from '@/shared/useNotices'
+import { useConfirmDialog } from '@/components/ConfirmDialog'
 import { FadeImage } from '@/components/FadeImage'
 import { SiteHeader } from '@/components/SiteHeader'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -131,14 +132,20 @@ function dragHasFiles(event: DragEvent | React.DragEvent): boolean {
   return Array.from(event.dataTransfer?.types || []).includes('Files')
 }
 
-interface UploadResultCardProps {
-  result: UploadResult
-  activeFormat: LinkFormat
-  onCopy: (value: string, successMessage?: string) => Promise<void>
-  onPreview: (result: UploadResult) => void
+interface ClientUploadResult extends UploadResult {
+  _cid: number
 }
 
-function UploadResultCard({ result, activeFormat, onCopy, onPreview }: UploadResultCardProps) {
+interface UploadResultCardProps {
+  result: ClientUploadResult
+  activeFormat: LinkFormat
+  deleting?: boolean
+  onCopy: (value: string, successMessage?: string) => Promise<void>
+  onPreview: (result: ClientUploadResult) => void
+  onDelete?: (result: ClientUploadResult) => void
+}
+
+function UploadResultCard({ result, activeFormat, deleting, onCopy, onPreview, onDelete }: UploadResultCardProps) {
   const [format, setFormat] = useState<LinkFormat>(activeFormat)
   const [copiedKey, setCopiedKey] = useState<string>('')
 
@@ -182,6 +189,12 @@ function UploadResultCard({ result, activeFormat, onCopy, onPreview }: UploadRes
               )}
             </div>
             <div className="flex items-center gap-1.5">
+              {result.webp_url && result.webp_url !== result.url && (
+                <Button type="button" variant="ghost" size="xs" onClick={() => void handleCopy(result.webp_url!, 'webp')}>
+                  {copiedKey === 'webp' ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                  {copiedKey === 'webp' ? '已复制' : 'WebP'}
+                </Button>
+              )}
               {result.url && (
                 <Button variant="ghost" size="xs" asChild>
                   <a href={result.url} target="_blank" rel="noopener noreferrer">
@@ -190,12 +203,16 @@ function UploadResultCard({ result, activeFormat, onCopy, onPreview }: UploadRes
                   </a>
                 </Button>
               )}
-              {result.del && (
-                <Button variant="outline" size="xs" asChild>
-                  <a href={result.del}>
-                    <Trash2 className="size-3.5" />
-                    删除
-                  </a>
+              {result.del && onDelete && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  disabled={deleting}
+                  onClick={() => onDelete(result)}
+                >
+                  {deleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                  删除
                 </Button>
               )}
             </div>
@@ -244,6 +261,7 @@ function UploadResultCard({ result, activeFormat, onCopy, onPreview }: UploadRes
 
 export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap }) {
   const copy = useMemo(() => useCopy(notifyToast), [])
+  const { confirm, dialog: confirmDialog } = useConfirmDialog()
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const capWidgetRef = useRef<CapWidgetElement>(null)
@@ -251,10 +269,13 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
   const [isWindowDragging, setIsWindowDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [progressItems, setProgressItems] = useState<ProgressItem[]>([])
-  const [results, setResults] = useState<UploadResult[]>([])
+  const progressItemsRef = useRef<ProgressItem[]>([])
+  const [results, setResults] = useState<ClientUploadResult[]>([])
+  const [deletingCid, setDeletingCid] = useState<number | null>(null)
   const [totalSize, setTotalSize] = useState(0)
   const [defaultFormat, setDefaultFormat] = useState<LinkFormat>('url')
-  const [previewResult, setPreviewResult] = useState<UploadResult | null>(null)
+  const [previewResult, setPreviewResult] = useState<ClientUploadResult | null>(null)
+  const [showApiModal, setShowApiModal] = useState(false)
   const [selectedStorageSource, setSelectedStorageSource] = useState(
     bootstrap.config.default_storage_source || bootstrap.config.storage_sources[0]?.id || 'local'
   )
@@ -267,6 +288,7 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
   const queueCursorRef = useRef(0)
   const activeWorkersRef = useRef(0)
   const nextItemIdRef = useRef(1)
+  const nextResultIdRef = useRef(1)
   const dragDepthRef = useRef(0)
   const uploadingRef = useRef(false)
 
@@ -311,7 +333,9 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
   }, [progressItems, isUploading, settledCount, uploadedTotal, totalSize])
 
   const patchProgressItem = useCallback((id: number, patch: Partial<ProgressItem>) => {
-    setProgressItems(prev => prev.map(item => (item.id === id ? { ...item, ...patch } : item)))
+    const next = progressItemsRef.current.map(item => (item.id === id ? { ...item, ...patch } : item))
+    progressItemsRef.current = next
+    setProgressItems(next)
   }, [])
 
   const uploadFileWhole = useCallback((
@@ -453,7 +477,10 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
               message => patchProgressItem(itemId, { status: 'processing', loaded: file.size, message })
             )
         patchProgressItem(itemId, { status: 'success', loaded: file.size, message: formatSize(file.size) })
-        if (result.url) setResults(prev => [result, ...prev])
+        if (result.url) {
+          const cid = nextResultIdRef.current++
+          setResults(prev => [{ ...result, _cid: cid }, ...prev])
+        }
       } catch (error) {
         patchProgressItem(itemId, {
           status: 'error',
@@ -465,10 +492,7 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
 
     activeWorkersRef.current--
     if (activeWorkersRef.current === 0) {
-      setProgressItems(current => {
-        finishBatch(current)
-        return current
-      })
+      finishBatch(progressItemsRef.current)
     }
   }, [chunkSize, finishBatch, patchProgressItem, uploadFileChunked, uploadFileWhole])
 
@@ -506,7 +530,9 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
     }
 
     const addedSize = accepted.reduce((sum, file) => sum + file.size, 0)
-    setProgressItems(prev => (freshBatch ? newItems : [...prev, ...newItems]))
+    const nextItems = freshBatch ? newItems : [...progressItemsRef.current, ...newItems]
+    progressItemsRef.current = nextItems
+    setProgressItems(nextItems)
     setTotalSize(prev => (freshBatch ? addedSize : prev + addedSize))
     uploadingRef.current = true
     setIsUploading(true)
@@ -720,6 +746,33 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
     void copy(formatResults(results, format), `已复制 ${copyableResults.length} 条链接`)
   }
 
+  async function handleDeleteResult(target: ClientUploadResult) {
+    if (!target.del || deletingCid !== null) return
+    const ok = await confirm({
+      title: '删除已上传图片？',
+      description: `确认永久删除「${resultName(target) || '该图片'}」？删除后无法恢复。`,
+      confirmLabel: '确认删除'
+    })
+    if (!ok) return
+
+    setDeletingCid(target._cid)
+    try {
+      const response = await fetch(target.del, { method: 'POST', credentials: 'same-origin' })
+      const data = await response.json().catch(() => ({})) as { code?: number; msg?: string }
+      if (!response.ok || data.code !== 200) {
+        notifyToast(data.msg || '删除失败', 'danger')
+        return
+      }
+      setResults(prev => prev.filter(item => item._cid !== target._cid))
+      if (previewResult?._cid === target._cid) setPreviewResult(null)
+      notifyToast(data.msg || '删除成功', 'success')
+    } catch (error) {
+      notifyToast(error instanceof Error ? error.message : '删除失败', 'danger')
+    } finally {
+      setDeletingCid(null)
+    }
+  }
+
   const previewIndex = useMemo(() => {
     if (!previewResult) return -1
     return copyableResults.findIndex(item => item === previewResult || (item.url && item.url === previewResult.url))
@@ -749,6 +802,7 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <Toaster />
+      {confirmDialog}
 
       {isWindowDragging && (
         <div
@@ -789,11 +843,9 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
               </>
             )}
             {bootstrap.config.api_status === 1 && (
-              <Button variant="ghost" size="sm" className="hidden sm:inline-flex" asChild>
-                <a href="/api/">
-                  <Code2 className="size-4" />
-                  <span className="hidden md:inline">API</span>
-                </a>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setShowApiModal(true)}>
+                <Code2 className="size-4" />
+                <span className="hidden md:inline">API</span>
               </Button>
             )}
             <Button variant={bootstrap.is_admin ? 'outline' : 'default'} size="sm" onClick={openAdmin}>
@@ -879,7 +931,7 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
             ref={fileInputRef}
             type="file"
             multiple
-            accept="image/*"
+            accept="image/*,.tif,.tiff"
             className="sr-only"
             onChange={event => {
               if (event.target.files) handleFiles(event.target.files)
@@ -935,7 +987,10 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
                         variant="ghost"
                         size="icon-xs"
                         aria-label="关闭上传进度"
-                        onClick={() => setProgressItems([])}
+                        onClick={() => {
+                          progressItemsRef.current = []
+                          setProgressItems([])
+                        }}
                       >
                         <X className="size-3.5" />
                       </Button>
@@ -1000,13 +1055,15 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
             </div>
 
             <div className="grid gap-3">
-              {results.map((result, index) => (
+              {results.map(result => (
                 <UploadResultCard
-                  key={`${result.url || 'item'}-${index}`}
+                  key={result._cid}
                   result={result}
                   activeFormat={defaultFormat}
+                  deleting={deletingCid === result._cid}
                   onCopy={copy}
                   onPreview={setPreviewResult}
+                  onDelete={item => void handleDeleteResult(item)}
                 />
               ))}
             </div>
@@ -1089,6 +1146,17 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
                   <Copy className="size-3.5" />
                   复制直链
                 </Button>
+                {previewResult.webp_url && previewResult.webp_url !== previewResult.url && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void copy(previewResult.webp_url || '', '已复制 WebP 链接')}
+                  >
+                    <Copy className="size-3.5" />
+                    复制 WebP
+                  </Button>
+                )}
                 <Button type="button" size="sm" variant="outline" asChild>
                   <a href={previewResult.url} target="_blank" rel="noopener noreferrer">
                     <ExternalLink className="size-3.5" />
@@ -1098,6 +1166,76 @@ export default function UploadApp({ bootstrap }: { bootstrap: UploadBootstrap })
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* API Upload Documentation Dialog */}
+      <Dialog open={showApiModal} onOpenChange={setShowApiModal}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>接口上传说明</DialogTitle>
+            <DialogDescription>使用 multipart/form-data 请求上传接口，token 可在服务端 config/api_key.json 中查看。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 text-xs">
+            <div className="space-y-1.5">
+              <Label>上传端点（POST）</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/index`}
+                  className="font-mono text-xs bg-muted/40"
+                  onFocus={e => e.currentTarget.select()}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void copy(`${window.location.origin}/api/index`, '已复制接口地址')}
+                >
+                  <Copy className="size-3.5" />
+                  复制
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>表单字段</Label>
+              <div className="rounded-lg border bg-muted/30 px-3 py-2.5 space-y-1 font-mono text-[11px]">
+                <p><span className="font-semibold text-foreground">image</span> — 图片文件（multipart file）</p>
+                <p><span className="font-semibold text-foreground">token</span> — API 授权令牌</p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>cURL 示例</Label>
+              <div className="rounded-lg border bg-muted/30 p-3 font-mono text-[11px] leading-relaxed break-all text-muted-foreground">
+                {`curl -X POST -F "image=@demo.png" -F "token=YOUR_TOKEN" ${typeof window !== 'undefined' ? window.location.origin : ''}/api/index`}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            {bootstrap.is_admin && (
+              <Button variant="outline" size="sm" asChild>
+                <a href="/api/v1/openapi.json" target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="size-3.5" />
+                  图片库 OpenAPI
+                </a>
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              onClick={() =>
+                void copy(
+                  `curl -X POST -F "image=@demo.png" -F "token=YOUR_TOKEN" ${window.location.origin}/api/index`,
+                  '已复制 cURL 命令'
+                )
+              }
+            >
+              <Copy className="size-3.5" />
+              复制 cURL
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

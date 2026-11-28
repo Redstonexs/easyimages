@@ -259,3 +259,11 @@ func TestImageListPayloadRejectsUnsafeDate(t *testing.T) {
 		t.Fatal("imageListPayload() error = nil, want unsafe date error")
 	}
 }
+
+func TestEscapeQueryPathPreservesSlashAndEscapesSpecialChars(t *testing.T) {
+	got := escapeQueryPath("/i/2026/05/01/a #b&c+1%2.png")
+	want := "/i/2026/05/01/a%20%23b%26c%2B1%252.png"
+	if got != want {
+		t.Fatalf("escapeQueryPath() = %q, want %q", got, want)
+	}
+}

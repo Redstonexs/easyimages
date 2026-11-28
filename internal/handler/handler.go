@@ -620,7 +620,7 @@ func DeleteByHash(cfg *config.Config) gin.HandlerFunc {
 		if cfg.ImageRecycle == 1 {
 			err = service.MoveToRecycle(path, cfg)
 		} else {
-			err = service.DeleteFile(path)
+			err = service.DeleteFileWithConfig(path, cfg)
 		}
 
 		if err != nil {
@@ -654,7 +654,7 @@ func DeleteAction(cfg *config.Config) gin.HandlerFunc {
 
 		switch mode {
 		case "delete":
-			if err := service.DeleteFile(url); err != nil {
+			if err := service.DeleteFileWithConfig(url, cfg); err != nil {
 				c.JSON(http.StatusOK, gin.H{
 					"code": 404,
 					"msg":  "删除失败",
@@ -840,7 +840,7 @@ func InstallAction(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		// 处理安装
-		domain := c.PostForm("domain")
+		domain := strings.TrimRight(strings.TrimSpace(c.PostForm("domain")), "/")
 		user := c.PostForm("user")
 		password := c.PostForm("password")
 
@@ -1219,7 +1219,7 @@ func HistoryDelete(cfg *config.Config) gin.HandlerFunc {
 
 		switch mode {
 		case "delete":
-			if err := service.DeleteFile(url); err != nil {
+			if err := service.DeleteFileWithConfig(url, cfg); err != nil {
 				c.JSON(http.StatusOK, gin.H{"code": 404, "msg": "删除失败", "type": "danger", "icon": "exclamation-sign"})
 				return
 			}
@@ -1238,7 +1238,7 @@ func HistoryDelete(cfg *config.Config) gin.HandlerFunc {
 
 func Filer(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "admin_filer.html", adminShellData(c, cfg, "filer"))
+		c.Redirect(http.StatusFound, "/admin/workspace?tab=files")
 	}
 }
 
@@ -1260,7 +1260,7 @@ func AdminDelete(cfg *config.Config) gin.HandlerFunc {
 
 		switch req.Mode {
 		case "delete":
-			if err := service.DeleteFile(req.URL); err != nil {
+			if err := service.DeleteFileWithConfig(req.URL, cfg); err != nil {
 				c.JSON(http.StatusOK, gin.H{
 					"code": 404,
 					"msg":  "删除失败",
@@ -1286,8 +1286,17 @@ func AdminDelete(cfg *config.Config) gin.HandlerFunc {
 			})
 
 		case "delDir":
-			dirPath := cfg.Path + req.URL
-			if err := service.DeleteDirectory(dirPath); err != nil {
+			rel := strings.TrimPrefix(strings.TrimSpace(req.URL), cfg.Path)
+			rel = strings.Trim(rel, "/")
+			if rel == "" || strings.Contains(rel, "..") || service.IsInternalStoragePath(rel) {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"code": 400,
+					"msg":  "无效的目录路径",
+				})
+				return
+			}
+			dirPath := cfg.Path + rel
+			if err := service.DeleteDirectoryWithConfig(dirPath, cfg); err != nil {
 				c.JSON(http.StatusOK, gin.H{
 					"code": 404,
 					"msg":  "删除文件夹失败",

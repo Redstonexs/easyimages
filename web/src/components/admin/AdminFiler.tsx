@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp,
   ChevronLeft,
   ChevronRight,
   Copy,
+  Download,
   ExternalLink,
   Folder,
   Inbox,
@@ -46,7 +47,13 @@ function fileExt(file: AdminFileEntry): string {
   return file.ext || file.name.split('.').pop()?.toUpperCase() || 'IMG'
 }
 
-export default function AdminFiler({ onNotice }: { onNotice: (message: string, type?: NoticeType) => void }) {
+export default function AdminFiler({
+  onNotice,
+  onFilesChanged
+}: {
+  onNotice: (message: string, type?: NoticeType) => void
+  onFilesChanged?: () => void
+}) {
   const copy = useMemo(() => useCopy(onNotice), [onNotice])
   const { confirm, dialog: confirmDialog } = useConfirmDialog()
 
@@ -57,33 +64,45 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
   const [selectedImage, setSelectedImage] = useState<AdminFileEntry | null>(null)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const showInitialSkeleton = useDelayedLoading(loading && !data)
+  const inflightRef = useRef<AbortController | null>(null)
 
-  const load = useCallback(async (path?: string) => {
+  const load = useCallback(async (path?: string, force = false) => {
+    inflightRef.current?.abort()
+    const controller = new AbortController()
+    inflightRef.current = controller
+
     const params = new URLSearchParams()
     if (path) params.set('path', path)
-    const cacheKey = `admin:filer:${params.toString()}`
-    const cached = getCached<AdminFilerData>(cacheKey)
+    const cacheKey = `admin:filer:${path || ''}`
+    const cached = !force ? getCached<AdminFilerData>(cacheKey) : undefined
     if (cached) setData(cached)
     setLoading(true)
     try {
-      const payload = params.toString() === ''
-        ? await fetchCached(cacheKey, () => adminApi.filer(params), 5_000)
-        : await adminApi.filer(params)
+      const payload = !force && !path
+        ? await fetchCached(cacheKey, () => adminApi.filer(params, { signal: controller.signal }), 5_000)
+        : await adminApi.filer(params, { signal: controller.signal })
+      if (controller.signal.aborted) return
       payload.dirs = payload.dirs ?? []
       payload.files = payload.files ?? []
       setCached(cacheKey, payload)
+      if (payload.path === payload.root_path) setCached('admin:filer:', payload)
       setData(payload)
       setQueryInput('')
       setSelected(new Set())
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return
       onNotice(error instanceof Error ? error.message : '加载目录失败', 'danger')
     } finally {
-      setLoading(false)
+      if (inflightRef.current === controller) {
+        inflightRef.current = null
+        setLoading(false)
+      }
     }
   }, [onNotice])
 
   useEffect(() => {
     void load()
+    return () => inflightRef.current?.abort()
   }, [load])
 
   const breadcrumbs = useMemo(() => {
@@ -176,8 +195,11 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
       const result = await adminApi.deleteFile(file.path)
       if (result.code === 200) {
         invalidateCached('admin:filer:')
+        invalidateCached('admin:history:')
         invalidateCached('admin:chart')
         invalidateCached('admin:overview')
+        invalidateCached('ws:images:')
+        invalidateCached('ws:folders:')
         setData(prev => (prev ? { ...prev, files: prev.files.filter(item => item.url !== file.url) } : prev))
         if (selectedImage?.url === file.url) setSelectedImage(null)
         setSelected(prev => {
@@ -185,6 +207,7 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
           next.delete(file.url)
           return next
         })
+        onFilesChanged?.()
         onNotice(result.msg || '删除成功', 'success')
       } else {
         onNotice(result.msg || '删除失败', 'danger')
@@ -211,8 +234,12 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
     const deleted = new Set(outcome.succeeded)
     if (deleted.size > 0) {
       invalidateCached('admin:filer:')
+      invalidateCached('admin:history:')
       invalidateCached('admin:chart')
       invalidateCached('admin:overview')
+      invalidateCached('ws:images:')
+      invalidateCached('ws:folders:')
+      onFilesChanged?.()
     }
     setData(prev => (prev ? { ...prev, files: prev.files.filter(item => !deleted.has(item.url)) } : prev))
     if (selectedImage && deleted.has(selectedImage.url)) setSelectedImage(null)
@@ -271,14 +298,14 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
                 上级
               </Button>
             )}
-            <Button type="button" size="xs" variant="outline" disabled={loading} onClick={() => void load(data.path)}>
+            <Button type="button" size="xs" variant="outline" disabled={loading} onClick={() => void load(data.path, true)}>
               <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} />
               刷新
             </Button>
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="grid lg:grid-cols-[188px_minmax(0,1fr)]">
           <aside className="border-b bg-muted/15 p-3 lg:border-r lg:border-b-0" aria-label="子目录">
             <div className="mb-2 flex items-center justify-between px-1 text-xs font-medium text-muted-foreground">
               <span>子目录</span>
@@ -355,18 +382,16 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
 
             {filteredFiles.length > 0 ? (
               <div className="rounded-lg border">
-                <Table>
+                <Table className="table-fixed">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-10">
+                      <TableHead className="w-9">
                         <Checkbox checked={allSelected} aria-label="全选当前文件" onCheckedChange={toggleAll} />
                       </TableHead>
-                      <TableHead className="w-16">预览</TableHead>
+                      <TableHead className="w-14">预览</TableHead>
                       <TableHead>文件信息</TableHead>
-                      <TableHead className="w-20">格式</TableHead>
-                      <TableHead className="w-24">大小</TableHead>
-                      <TableHead className="w-36">修改时间</TableHead>
-                      <TableHead className="w-40 text-right">操作</TableHead>
+                      <TableHead className="hidden w-32 md:table-cell">大小 / 时间</TableHead>
+                      <TableHead className="w-40 text-right sm:w-44">操作</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -386,7 +411,7 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
                             <button
                               type="button"
                               onClick={() => setSelectedImage(file)}
-                              className="checker-well block size-11 overflow-hidden rounded-md border transition-transform duration-150 hover:scale-105 cursor-pointer"
+                              className="checker-well block size-10 overflow-hidden rounded-md border transition-transform duration-150 hover:scale-105 cursor-pointer"
                               title={`预览 ${name}`}
                             >
                               <FadeImage
@@ -396,38 +421,41 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
                               />
                             </button>
                           </TableCell>
-                          <TableCell className="max-w-[260px]">
+                          <TableCell className="min-w-0">
                             <p className="truncate font-medium" title={name}>{name}</p>
                             {file.original_name && (
                               <p className="truncate font-mono text-[11px] text-muted-foreground" title={file.name}>
                                 {file.name}
                               </p>
                             )}
-                            <p className="truncate font-mono text-[11px] text-muted-foreground/80" title={file.path}>
-                              {file.path}
-                            </p>
+                            <div className="mt-0.5 flex items-center gap-1.5 min-w-0">
+                              <Badge variant="secondary" className="shrink-0 font-mono text-[10px] py-0">
+                                {fileExt(file)}
+                              </Badge>
+                              <span className="truncate font-mono text-[11px] text-muted-foreground/80" title={file.path}>
+                                {file.path}
+                              </span>
+                              <span className="shrink-0 font-mono text-[11px] text-muted-foreground md:hidden">
+                                · {file.size_human || '-'}
+                              </span>
+                            </div>
                           </TableCell>
-                          <TableCell>
-                            <Badge variant="secondary" className="font-mono text-[10px]">{fileExt(file)}</Badge>
+                          <TableCell className="hidden whitespace-nowrap font-mono tabular-nums md:table-cell">
+                            <p className="text-xs">{file.size_human || '-'}</p>
+                            <p className="text-[11px] text-muted-foreground">{file.modified_at || '-'}</p>
                           </TableCell>
-                          <TableCell className="font-mono text-xs whitespace-nowrap tabular-nums">
-                            {file.size_human || '-'}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap tabular-nums">
-                            {file.modified_at || '-'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="inline-flex items-center justify-end gap-1">
-                              <Button type="button" size="xs" variant="ghost" onClick={() => void copy(file.url)}>
+                          <TableCell className="text-right whitespace-nowrap">
+                            <div className="inline-flex items-center justify-end gap-0.5">
+                              <Button type="button" size="xs" variant="ghost" className="px-1.5" onClick={() => void copy(file.url)}>
                                 <Copy className="size-3" />
                                 复制
                               </Button>
                               {file.webp_url && (
-                                <Button type="button" size="xs" variant="ghost" onClick={() => void copy(file.webp_url!)}>
+                                <Button type="button" size="xs" variant="ghost" className="px-1.5" onClick={() => void copy(file.webp_url!)}>
                                   WebP
                                 </Button>
                               )}
-                              <Button size="icon-sm" variant="ghost" className="size-7" asChild title="查看">
+                              <Button size="icon-sm" variant="ghost" className="hidden size-7 sm:inline-flex" asChild title="查看">
                                 <a href={file.url} target="_blank" rel="noopener noreferrer">
                                   <ExternalLink className="size-3.5" />
                                 </a>
@@ -476,7 +504,11 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
                     </Badge>
                   )}
                 </DialogTitle>
-                <DialogDescription className="truncate font-mono text-xs">{selectedImage.path}</DialogDescription>
+                <DialogDescription className="truncate font-mono text-xs">
+                  {selectedImage.path}
+                  {selectedImage.size_human ? ` · ${selectedImage.size_human}` : ''}
+                  {selectedImage.modified_at ? ` · ${selectedImage.modified_at}` : ''}
+                </DialogDescription>
               </DialogHeader>
               <div className="checker-well relative flex max-h-[72vh] min-h-[240px] items-center justify-center overflow-hidden rounded-lg border p-2">
                 {filteredFiles.length > 1 && (
@@ -529,6 +561,18 @@ export default function AdminFiler({ onNotice }: { onNotice: (message: string, t
                   <Button type="button" size="sm" onClick={() => void copy(selectedImage.url)}>
                     <Copy className="size-3.5" />
                     复制链接
+                  </Button>
+                  {selectedImage.webp_url && (
+                    <Button type="button" size="sm" variant="outline" onClick={() => void copy(selectedImage.webp_url!, '已复制 WebP 链接')}>
+                      <Copy className="size-3.5" />
+                      复制 WebP
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={`/app/down?dw=${encodeURIComponent(selectedImage.path)}`}>
+                      <Download className="size-3.5" />
+                      下载
+                    </a>
                   </Button>
                   <Button variant="outline" size="sm" asChild>
                     <a href={selectedImage.url} target="_blank" rel="noopener noreferrer">

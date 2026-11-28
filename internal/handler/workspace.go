@@ -315,9 +315,10 @@ func (h workspaceHTTP) updateSettings(c *gin.Context, actor workspace.Identity) 
 
 type workspaceAsset struct {
 	workspace.Asset
-	URL     string `json:"url"`
-	WebPURL string `json:"webp_url,omitempty"`
-	Legacy  bool   `json:"legacy,omitempty"`
+	URL        string `json:"url"`
+	WebPURL    string `json:"webp_url,omitempty"`
+	Legacy     bool   `json:"legacy,omitempty"`
+	LegacyPath string `json:"legacy_path,omitempty"`
 }
 
 func (settings deliverySettings) asset(item workspace.Asset) workspaceAsset {

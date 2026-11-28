@@ -247,3 +247,60 @@ func TestAdminFilerPayloadReturnsEmptyDirsForLeafDirectory(t *testing.T) {
 		t.Fatalf("Files length = %d, want 1", len(payload.Files))
 	}
 }
+
+func TestAdminConfigSaveUpdatesAndPreservesCaptchaSecretsAndTrimsDomain(t *testing.T) {
+	cfg := &config.Config{
+		Domain:             "https://old.example.com",
+		TurnstileSecretKey: "existing-ts-secret",
+		RecaptchaSecretKey: "existing-rc-secret",
+		CompressRatio:      80,
+		WaterPosition:      9,
+	}
+
+	applyAdminConfigPayload(cfg, adminConfigPayload{
+		Domain:           "https://img.example.com/",
+		ImageURL:         "https://cdn.example.com///",
+		CompressRatio:    150,
+		WaterPosition:    4,
+		TurnstileSiteKey: "ts-site",
+		RecaptchaSiteKey: "rc-site",
+	})
+
+	if cfg.Domain != "https://img.example.com" || cfg.ImageURL != "https://cdn.example.com" {
+		t.Fatalf("trimmed origins = %q / %q", cfg.Domain, cfg.ImageURL)
+	}
+	if cfg.CompressRatio != 100 || cfg.WaterPosition != 4 {
+		t.Fatalf("CompressRatio=%d WaterPosition=%d", cfg.CompressRatio, cfg.WaterPosition)
+	}
+	if cfg.TurnstileSecretKey != "existing-ts-secret" || cfg.RecaptchaSecretKey != "existing-rc-secret" {
+		t.Fatal("existing secrets were overwritten by empty payload values")
+	}
+
+	applyAdminConfigPayload(cfg, adminConfigPayload{
+		TurnstileSecretKey: "new-ts-secret",
+		RecaptchaSecretKey: "new-rc-secret",
+	})
+	if cfg.TurnstileSecretKey != "new-ts-secret" || cfg.RecaptchaSecretKey != "new-rc-secret" {
+		t.Fatal("explicit secret updates were not applied")
+	}
+	if payload := adminConfigFromConfig(cfg); !payload.TurnstileSecretSet || !payload.RecaptchaSecretSet || payload.TurnstileSecretKey != "" {
+		t.Fatalf("secret leaked or flags missing: %+v", payload)
+	}
+}
+
+func TestFilerRedirectsToWorkspaceFilesTab(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/admin/filer", Filer(&config.Config{}))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/filer", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusFound)
+	}
+	if got := w.Header().Get("Location"); got != "/admin/workspace?tab=files" {
+		t.Fatalf("Location = %q, want /admin/workspace?tab=files", got)
+	}
+}

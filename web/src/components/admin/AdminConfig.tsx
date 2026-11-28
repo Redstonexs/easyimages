@@ -14,6 +14,7 @@ import {
 import type { AdminConfig as AdminConfigType, AdminOverview } from '@/types'
 import type { NoticeType } from '@/shared/notify'
 import { adminApi } from '@/shared/adminApi'
+import { formatSize } from '@/shared/format'
 import { normalizeStorageSources, validateStorageSources } from '@/shared/storageSources'
 import { fetchCached, getCached, setCached } from '@/shared/swrCache'
 import { useDelayedLoading } from '@/shared/useDelayedLoading'
@@ -27,6 +28,18 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import StorageSourcesEditor from '@/components/admin/StorageSourcesEditor'
+
+const WATERMARK_POSITIONS: Array<{ pos: number; label: string }> = [
+  { pos: 1, label: '左上' },
+  { pos: 2, label: '上中' },
+  { pos: 3, label: '右上' },
+  { pos: 4, label: '左中' },
+  { pos: 5, label: '居中' },
+  { pos: 6, label: '右中' },
+  { pos: 7, label: '左下' },
+  { pos: 8, label: '下中' },
+  { pos: 9, label: '右下' }
+]
 
 interface AdminConfigProps {
   onNotice: (message: string, type?: NoticeType) => void
@@ -48,6 +61,8 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
   const [converting, setConverting] = useState(false)
   const [uploadingIcon, setUploadingIcon] = useState(false)
   const [overview, setOverview] = useState<AdminOverview | null>(initialOverview ?? null)
+  const overviewRef = useRef(overview)
+  overviewRef.current = overview
   const [config, setConfig] = useState<AdminConfigType | null>(initialNormalizedConfig)
   const [snapshot, setSnapshot] = useState(() => (initialNormalizedConfig ? JSON.stringify(initialNormalizedConfig) : ''))
   const siteIconInputRef = useRef<HTMLInputElement>(null)
@@ -114,7 +129,17 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
     event?.preventDefault()
     if (!config || saving) return
     const normalizedSources = normalizeStorageSources(config.storage_sources)
-    const nextConfig: AdminConfigType = { ...config, storage_sources: normalizedSources }
+    const nextConfig: AdminConfigType = {
+      ...config,
+      maxSize: config.maxSize > 0 ? config.maxSize : (overviewRef.current?.config.maxSize || 5 * 1024 * 1024),
+      compress_ratio: Math.min(100, Math.max(1, config.compress_ratio || 80)),
+      thumbnail_w: config.thumbnail_w > 0 ? config.thumbnail_w : 300,
+      thumbnail_h: config.thumbnail_h > 0 ? config.thumbnail_h : 300,
+      webp_quality: Math.min(100, Math.max(1, config.webp_quality || 80)),
+      textSize: config.textSize > 0 ? config.textSize : 16,
+      waterPosition: config.waterPosition >= 1 && config.waterPosition <= 9 ? config.waterPosition : 9,
+      storage_sources: normalizedSources
+    }
     const storageErrors = validateStorageSources(normalizedSources, nextConfig.default_storage_source)
     if (storageErrors.length) {
       onNotice(storageErrors[0], 'danger')
@@ -126,8 +151,10 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
       result.config.storage_sources = normalizeStorageSources(result.config.storage_sources)
       setConfig(result.config)
       setSnapshot(JSON.stringify(result.config))
-      if (overview) {
-        setCached('admin:overview', { ...overview, config: result.config })
+      if (overviewRef.current) {
+        const nextOverview = { ...overviewRef.current, config: result.config }
+        setOverview(nextOverview)
+        setCached('admin:overview', nextOverview)
       }
       onNotice(result.msg || '配置已保存', 'success')
     } catch (error) {
@@ -183,6 +210,16 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
     try {
       const result = await adminApi.uploadSiteIcon(formData)
       setConfig(prev => (prev ? { ...prev, site_icon: result.site_icon } : prev))
+      if (overviewRef.current) {
+        const nextOverview = {
+          ...overviewRef.current,
+          config: { ...overviewRef.current.config, site_icon: result.site_icon }
+        }
+        setOverview(nextOverview)
+        setCached('admin:overview', nextOverview)
+      }
+      const faviconLink = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+      if (faviconLink) faviconLink.href = result.site_icon
       setSnapshot(prev => {
         if (!prev) return prev
         try {
@@ -342,12 +379,18 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="cfg-max-size">最大上传大小（字节）</Label>
+                  <Label htmlFor="cfg-max-size">
+                    最大上传大小（字节 · 当前 {formatSize(config.maxSize || 0)}）
+                  </Label>
                   <Input
                     id="cfg-max-size"
                     type="number"
-                    value={config.maxSize}
-                    onChange={e => updateField('maxSize', Number(e.target.value) || 0)}
+                    min={1}
+                    value={config.maxSize || ''}
+                    onChange={e => updateField('maxSize', e.target.value === '' ? 0 : Number(e.target.value))}
+                    onBlur={() => {
+                      if (config.maxSize <= 0) updateField('maxSize', overview?.config.maxSize || 5 * 1024 * 1024)
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -357,8 +400,9 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
                     type="number"
                     min={1}
                     max={100}
-                    value={config.compress_ratio}
-                    onChange={e => updateField('compress_ratio', Number(e.target.value) || 80)}
+                    value={config.compress_ratio || ''}
+                    onChange={e => updateField('compress_ratio', e.target.value === '' ? 0 : Number(e.target.value))}
+                    onBlur={() => updateField('compress_ratio', Math.min(100, Math.max(1, config.compress_ratio || 80)))}
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
@@ -402,8 +446,10 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
                   <Input
                     id="cfg-thumb-w"
                     type="number"
-                    value={config.thumbnail_w}
-                    onChange={e => updateField('thumbnail_w', Number(e.target.value) || 0)}
+                    min={1}
+                    value={config.thumbnail_w || ''}
+                    onChange={e => updateField('thumbnail_w', e.target.value === '' ? 0 : Number(e.target.value))}
+                    onBlur={() => { if (config.thumbnail_w <= 0) updateField('thumbnail_w', 300) }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -411,8 +457,10 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
                   <Input
                     id="cfg-thumb-h"
                     type="number"
-                    value={config.thumbnail_h}
-                    onChange={e => updateField('thumbnail_h', Number(e.target.value) || 0)}
+                    min={1}
+                    value={config.thumbnail_h || ''}
+                    onChange={e => updateField('thumbnail_h', e.target.value === '' ? 0 : Number(e.target.value))}
+                    onBlur={() => { if (config.thumbnail_h <= 0) updateField('thumbnail_h', 300) }}
                   />
                 </div>
               </div>
@@ -436,11 +484,25 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
                     type="number"
                     min={1}
                     max={100}
-                    value={config.webp_quality}
-                    onChange={e => updateField('webp_quality', Number(e.target.value) || 80)}
+                    value={config.webp_quality || ''}
+                    onChange={e => updateField('webp_quality', e.target.value === '' ? 0 : Number(e.target.value))}
+                    onBlur={() => updateField('webp_quality', Math.min(100, Math.max(1, config.webp_quality || 80)))}
                     className="w-20"
                   />
-                  <Button type="button" variant="outline" size="sm" disabled={converting} onClick={() => void batchWebP()}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={converting || config.webp_convert !== 1 || overview?.config.webp_convert !== 1}
+                    title={
+                      config.webp_convert !== 1
+                        ? '请先开启“自动生成 WebP”'
+                        : overview?.config.webp_convert !== 1
+                          ? '请先点击“保存配置”使 WebP 设置生效'
+                          : '扫描本地存量图片并生成 WebP 副本'
+                    }
+                    onClick={() => void batchWebP()}
+                  >
                     {converting ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
                     {converting ? '转换中...' : '批量生成 WebP'}
                   </Button>
@@ -456,8 +518,8 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
               <CardTitle className="text-base">水印设置</CardTitle>
               <CardDescription>为本地上传的新图片叠加文字或图片水印。</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
+            <CardContent className="space-y-5">
+              <div className="space-y-2 sm:max-w-xs">
                 <Label>水印类型</Label>
                 <Select
                   value={String(config.watermark)}
@@ -473,60 +535,90 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="cfg-water-pos">水印位置（1-9 九宫格）</Label>
-                <Input
-                  id="cfg-water-pos"
-                  type="number"
-                  min={1}
-                  max={9}
-                  value={config.waterPosition}
-                  onChange={e => updateField('waterPosition', Number(e.target.value) || 9)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cfg-water-text">水印文字</Label>
-                <Input
-                  id="cfg-water-text"
-                  value={config.waterText}
-                  onChange={e => updateField('waterText', e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cfg-water-color">文字颜色</Label>
-                <Input
-                  id="cfg-water-color"
-                  value={config.textColor}
-                  onChange={e => updateField('textColor', e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cfg-water-size">文字大小</Label>
-                <Input
-                  id="cfg-water-size"
-                  type="number"
-                  value={config.textSize}
-                  onChange={e => updateField('textSize', Number(e.target.value) || 16)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cfg-water-font">字体文件路径</Label>
-                <Input
-                  id="cfg-water-font"
-                  value={config.textFont}
-                  onChange={e => updateField('textFont', e.target.value)}
-                  className="font-mono text-xs"
-                />
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="cfg-water-img">水印图片路径</Label>
-                <Input
-                  id="cfg-water-img"
-                  value={config.waterImg}
-                  onChange={e => updateField('waterImg', e.target.value)}
-                  className="font-mono text-xs"
-                />
-              </div>
+
+              {config.watermark === 0 ? (
+                <p className="rounded-lg border border-dashed py-6 text-center text-xs text-muted-foreground">
+                  当前未启用水印，选择“文字水印”或“图片水印”后可配置水印位置与样式。
+                </p>
+              ) : (
+                <div className="grid gap-5 md:grid-cols-[200px_minmax(0,1fr)]">
+                  <div className="space-y-2">
+                    <Label>水印位置（九宫格）</Label>
+                    <div className="grid grid-cols-3 gap-1.5 rounded-lg border bg-muted/20 p-2" role="group" aria-label="水印九宫格位置">
+                      {WATERMARK_POSITIONS.map(item => {
+                        const active = config.waterPosition === item.pos
+                        return (
+                          <button
+                            key={item.pos}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => updateField('waterPosition', item.pos)}
+                            className={`h-8 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                              active
+                                ? 'bg-primary text-primary-foreground shadow-2xs'
+                                : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground border'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {config.watermark === 1 ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label htmlFor="cfg-water-text">水印文字</Label>
+                        <Input
+                          id="cfg-water-text"
+                          value={config.waterText}
+                          onChange={e => updateField('waterText', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cfg-water-color">文字颜色</Label>
+                        <Input
+                          id="cfg-water-color"
+                          value={config.textColor}
+                          onChange={e => updateField('textColor', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cfg-water-size">文字大小（px）</Label>
+                        <Input
+                          id="cfg-water-size"
+                          type="number"
+                          min={8}
+                          max={200}
+                          value={config.textSize || ''}
+                          onChange={e => updateField('textSize', e.target.value === '' ? 0 : Number(e.target.value))}
+                          onBlur={() => { if (config.textSize <= 0) updateField('textSize', 16) }}
+                        />
+                      </div>
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label htmlFor="cfg-water-font">字体文件路径</Label>
+                        <Input
+                          id="cfg-water-font"
+                          value={config.textFont}
+                          onChange={e => updateField('textFont', e.target.value)}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label htmlFor="cfg-water-img">水印图片路径</Label>
+                      <Input
+                        id="cfg-water-img"
+                        value={config.waterImg}
+                        onChange={e => updateField('waterImg', e.target.value)}
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -571,27 +663,55 @@ export default function AdminConfig({ onNotice, onDirtyChange }: AdminConfigProp
                   </div>
 
                   {config.captcha_type === 1 && (
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="cfg-turnstile">Turnstile Site Key</Label>
-                      <Input
-                        id="cfg-turnstile"
-                        value={config.turnstile_site_key}
-                        onChange={e => updateField('turnstile_site_key', e.target.value)}
-                        className="font-mono text-xs"
-                      />
-                    </div>
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="cfg-turnstile">Turnstile Site Key</Label>
+                        <Input
+                          id="cfg-turnstile"
+                          value={config.turnstile_site_key}
+                          onChange={e => updateField('turnstile_site_key', e.target.value)}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cfg-turnstile-secret">Turnstile Secret Key</Label>
+                        <Input
+                          id="cfg-turnstile-secret"
+                          type="password"
+                          autoComplete="new-password"
+                          value={config.turnstile_secret_key || ''}
+                          onChange={e => updateField('turnstile_secret_key', e.target.value)}
+                          placeholder={config.turnstile_secret_set ? '已配置，留空保持不变' : '请输入 Turnstile Secret Key'}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                    </>
                   )}
 
                   {config.captcha_type === 2 && (
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="cfg-recaptcha">reCAPTCHA Site Key</Label>
-                      <Input
-                        id="cfg-recaptcha"
-                        value={config.recaptcha_site_key}
-                        onChange={e => updateField('recaptcha_site_key', e.target.value)}
-                        className="font-mono text-xs"
-                      />
-                    </div>
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="cfg-recaptcha">reCAPTCHA Site Key</Label>
+                        <Input
+                          id="cfg-recaptcha"
+                          value={config.recaptcha_site_key}
+                          onChange={e => updateField('recaptcha_site_key', e.target.value)}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cfg-recaptcha-secret">reCAPTCHA Secret Key</Label>
+                        <Input
+                          id="cfg-recaptcha-secret"
+                          type="password"
+                          autoComplete="new-password"
+                          value={config.recaptcha_secret_key || ''}
+                          onChange={e => updateField('recaptcha_secret_key', e.target.value)}
+                          placeholder={config.recaptcha_secret_set ? '已配置，留空保持不变' : '请输入 reCAPTCHA Secret Key'}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                    </>
                   )}
 
                   {config.captcha_type === 3 && (

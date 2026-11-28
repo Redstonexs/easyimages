@@ -621,11 +621,15 @@ func CollectDirStats(dir string) DirStats {
 			}
 			return nil
 		}
+		name := d.Name()
+		if strings.HasPrefix(name, ".") || !IsImageFile(name) {
+			return nil
+		}
 		stats.TotalFiles++
 		if info, infoErr := d.Info(); infoErr == nil {
 			stats.TotalSize += info.Size()
 		}
-		if ext := strings.ToLower(filepath.Ext(d.Name())); ext != "" {
+		if ext := strings.ToLower(filepath.Ext(name)); ext != "" {
 			stats.ByExt[ext]++
 		}
 		if rel, relErr := filepath.Rel(cleanDir, entryPath); relErr == nil {
@@ -661,8 +665,15 @@ func FormatSize(bytes int64) string {
 
 // DeleteFile 删除文件
 func DeleteFile(path string) error {
-	cfg := config.Get()
-	cleanedPath := strings.TrimPrefix(path, cfg.Domain)
+	return DeleteFileWithConfig(path, config.Get())
+}
+
+// DeleteFileWithConfig 使用指定配置删除图片及其关联缩略图/WebP 副本。
+func DeleteFileWithConfig(path string, cfg *config.Config) error {
+	if cfg == nil {
+		cfg = config.Get()
+	}
+	cleanedPath := trimConfiguredOrigins(path, cfg)
 	if metadata, ok := GetImageMetadata(cleanedPath); ok && metadata.StorageType == "s3" {
 		source, sourceOK := cfg.StorageSourceByID(metadata.StorageSource)
 		if !sourceOK || source.Type != "s3" {
@@ -680,7 +691,7 @@ func DeleteFile(path string) error {
 	}
 
 	// 验证并获取安全路径
-	safePath, err := getSafePath(cleanedPath)
+	safePath, err := getSafePathWithConfig(cleanedPath, cfg)
 	if err != nil {
 		return err
 	}
@@ -688,14 +699,52 @@ func DeleteFile(path string) error {
 	if err := os.Remove(safePath); err != nil {
 		return err
 	}
+	cleanupCompanionFiles(cleanedPath, cfg)
 	DeleteImageMetadata(cleanedPath)
 	return nil
+}
+
+func trimConfiguredOrigins(raw string, cfg *config.Config) string {
+	cleaned := raw
+	for _, origin := range []string{cfg.Domain, cfg.ImageURL} {
+		trimmed := strings.TrimRight(origin, "/")
+		if trimmed != "" && strings.HasPrefix(cleaned, trimmed) {
+			cleaned = strings.TrimPrefix(cleaned, trimmed)
+			break
+		}
+	}
+	return cleaned
+}
+
+func cleanupCompanionFiles(userPath string, cfg *config.Config) {
+	safePath, err := getSafePathWithConfig(userPath, cfg)
+	if err != nil {
+		return
+	}
+	baseDir, err := filepath.Abs(filepath.Join(".", cfg.Path))
+	if err != nil {
+		return
+	}
+	relFromBase, err := filepath.Rel(baseDir, safePath)
+	if err != nil || strings.HasPrefix(relFromBase, "..") {
+		return
+	}
+	thumbName := sanitizeFilename(strings.ReplaceAll(relFromBase, string(filepath.Separator), "_"))
+	_ = os.Remove(filepath.Join(baseDir, "cache", thumbName))
+
+	slashRel := filepath.ToSlash(relFromBase)
+	if !strings.HasPrefix(slashRel, "webp/") && !strings.EqualFold(filepath.Ext(relFromBase), ".webp") {
+		webpRel := strings.TrimSuffix(relFromBase, filepath.Ext(relFromBase)) + ".webp"
+		webpPath := filepath.Join(baseDir, "webp", webpRel)
+		_ = os.Remove(webpPath)
+		DeleteImageMetadata(strings.TrimRight(cfg.Path, "/") + "/webp/" + filepath.ToSlash(webpRel))
+	}
 }
 
 // MoveToRecycle 移动到回收站
 func MoveToRecycle(path string, cfg *config.Config) error {
 	// 提取相对路径
-	relPath := strings.TrimPrefix(path, cfg.Domain)
+	relPath := trimConfiguredOrigins(path, cfg)
 	relPath = strings.TrimPrefix(relPath, cfg.Path)
 
 	// 验证相对路径安全性
@@ -704,7 +753,7 @@ func MoveToRecycle(path string, cfg *config.Config) error {
 	}
 
 	// 构建源路径 - 使用getSafePath验证
-	safeSrcPath, err := getSafePath(cfg.Path + relPath)
+	safeSrcPath, err := getSafePathWithConfig(cfg.Path+relPath, cfg)
 	if err != nil {
 		return err
 	}
@@ -721,6 +770,7 @@ func MoveToRecycle(path string, cfg *config.Config) error {
 	if err := os.Rename(safeSrcPath, dstPath); err != nil {
 		return err
 	}
+	cleanupCompanionFiles(cfg.Path+relPath, cfg)
 	DeleteImageMetadata(cfg.Path + relPath)
 	return nil
 }
@@ -754,8 +804,15 @@ func RestoreFromRecycle(name string, cfg *config.Config) error {
 
 // DeleteDirectory 删除目录
 func DeleteDirectory(path string) error {
-	// 验证并获取安全路径
-	safePath, err := getSafePath(path)
+	return DeleteDirectoryWithConfig(path, config.Get())
+}
+
+// DeleteDirectoryWithConfig 使用指定配置删除目录。
+func DeleteDirectoryWithConfig(path string, cfg *config.Config) error {
+	if cfg == nil {
+		cfg = config.Get()
+	}
+	safePath, err := getSafePathWithConfig(path, cfg)
 	if err != nil {
 		return err
 	}

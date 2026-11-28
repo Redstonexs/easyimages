@@ -259,14 +259,20 @@ func BuildUploadTarget(originalFilename string, cfg *config.Config, source confi
 	return UploadTarget{OriginalName: originalName, BaseName: baseName, Ext: ext, StoragePath: storagePath, FileName: fileName, RelativePath: relativePath, ObjectKey: objectKey, UploadedAt: now}, nil
 }
 
-// isAllowedExtension 检查扩展名是否允许
-// 使用逗号包裹的字符串搜索，避免每次调用都 Split 分配新切片。
+// isAllowedExtension 检查扩展名是否允许（忽略大小写及逗号周围空白）。
 func isAllowedExtension(ext, allowedExtensions string) bool {
-	if allowedExtensions == "" {
+	if allowedExtensions == "" || ext == "" {
 		return false
 	}
-	// ",jpg,jpeg,png," 中查找 ",ext,"
-	return strings.Contains(","+allowedExtensions+",", ","+ext+",")
+	rest := allowedExtensions
+	for rest != "" {
+		var item string
+		item, rest, _ = strings.Cut(rest, ",")
+		if strings.EqualFold(strings.TrimSpace(item), ext) {
+			return true
+		}
+	}
+	return false
 }
 
 // AddWatermark 添加水印

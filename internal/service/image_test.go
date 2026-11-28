@@ -110,6 +110,18 @@ func TestStartImagePostProcessDoesNotBlockWhenQueueIsFull(t *testing.T) {
 	}
 }
 
+func TestIsAllowedExtensionHandlesWhitespaceAndCase(t *testing.T) {
+	allowed := "jpg, png , GIF,webp"
+	for _, ext := range []string{"jpg", "png", "gif", "webp"} {
+		if !isAllowedExtension(ext, allowed) {
+			t.Fatalf("expected extension %q to be allowed in %q", ext, allowed)
+		}
+	}
+	if isAllowedExtension("exe", allowed) || isAllowedExtension("", allowed) {
+		t.Fatal("disallowed or empty extension was accepted")
+	}
+}
+
 func prependFakeCwebp(t *testing.T) {
 	t.Helper()
 

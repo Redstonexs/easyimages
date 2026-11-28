@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Copy, ExternalLink, Loader2, Sparkles, Trash2, X } from 'lucide-react'
+import { AlertCircle, ChevronLeft, ChevronRight, Copy, ExternalLink, Loader2, Sparkles, Trash2, X } from 'lucide-react'
 import type { NoticeType } from '@/shared/notify'
+import { adminApi } from '@/shared/adminApi'
 import { formatSize } from '@/shared/format'
+import { invalidateCached } from '@/shared/swrCache'
 import { useCopy } from '@/shared/useCopy'
 import { useDelayedLoading } from '@/shared/useDelayedLoading'
 import type { WorkspaceAsset, WorkspaceFolder, WorkspaceTransform } from '@/shared/workspaceApi'
@@ -9,6 +11,7 @@ import { workspaceApi } from '@/shared/workspaceApi'
 import { useConfirmDialog } from '@/components/ConfirmDialog'
 import { FadeImage } from '@/components/FadeImage'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -19,10 +22,22 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 const ROOT_SENTINEL = '__root__'
 
+function formatCreatedAt(raw?: string): string {
+  if (!raw) return ''
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime()) || date.getFullYear() <= 1970) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 interface WorkspaceImageDetailProps {
   id: string
   folders: WorkspaceFolder[]
   embedded?: boolean
+  isAdmin?: boolean
+  positionLabel?: string
+  onPrev?: () => void
+  onNext?: () => void
   onNotice: (message: string, type?: NoticeType) => void
   onClose?: () => void
   onRemoved: () => void
@@ -33,6 +48,10 @@ export default function WorkspaceImageDetail({
   id,
   folders,
   embedded = false,
+  isAdmin = false,
+  positionLabel,
+  onPrev,
+  onNext,
   onNotice,
   onClose,
   onRemoved,
@@ -68,6 +87,9 @@ export default function WorkspaceImageDetail({
         setImage(data.image)
         setVariants(data.variants)
         setDestination(data.image.folder)
+        if (data.image.content_type === 'image/png') setFormat('png')
+        else if (data.image.content_type === 'image/webp') setFormat('webp')
+        else setFormat('jpeg')
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : '无法加载图片')
       } finally {
@@ -126,11 +148,15 @@ export default function WorkspaceImageDetail({
   }
 
   async function remove(variant?: WorkspaceAsset) {
+    const isLegacyDelete = !variant && Boolean(image?.legacy)
+    if (isLegacyDelete && !(isAdmin && image?.legacy_path)) return
     const ok = await confirm({
-      title: variant ? '删除预生成版本？' : '删除原图及所有版本？',
+      title: variant ? '删除预生成版本？' : isLegacyDelete ? '删除旧图及关联副本？' : '删除原图及所有版本？',
       description: variant
         ? `确认删除版本「${variant.filename}」？`
-        : '删除原图会同时删除它的全部预生成版本，此操作不可恢复。',
+        : isLegacyDelete
+          ? `确认永久删除旧图「${image?.filename}」？关联缩略图与 WebP 副本也将同步清理，此操作不可恢复。`
+          : '删除原图会同时删除它的全部预生成版本，此操作不可恢复。',
       confirmLabel: '确认删除'
     })
     if (!ok) return
@@ -141,6 +167,14 @@ export default function WorkspaceImageDetail({
         await workspaceApi.deleteVariant(id, variant.id)
         setVariants(prev => prev.filter(item => item.id !== variant.id))
         onChanged()
+      } else if (isLegacyDelete && image?.legacy_path) {
+        const result = await adminApi.deleteFile(image.legacy_path)
+        if (result.code !== 200) throw new Error(result.msg || '删除失败')
+        invalidateCached('admin:filer:')
+        invalidateCached('admin:history:')
+        invalidateCached('admin:chart')
+        invalidateCached('admin:overview')
+        onRemoved()
       } else {
         await workspaceApi.deleteImage(id)
         onRemoved()
@@ -166,16 +200,28 @@ export default function WorkspaceImageDetail({
         <div className="space-y-5">
           <div className={`flex flex-wrap items-start justify-between gap-3 ${embedded ? 'pr-8' : 'px-5'}`}>
             <div className="min-w-0 space-y-1">
-              <h2 className="truncate text-base leading-snug font-semibold tracking-tight">{image.filename}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="truncate text-base leading-snug font-semibold tracking-tight">{image.filename}</h2>
+                {positionLabel && (
+                  <Badge variant="outline" className="shrink-0 font-mono text-[10px] font-normal tabular-nums">
+                    {positionLabel}
+                  </Badge>
+                )}
+              </div>
               <p className="font-mono text-xs text-muted-foreground">
                 {image.folder || '根目录'} · {formatSize(image.size_bytes)}
                 {image.width && image.height ? ` · ${image.width} × ${image.height}` : ''}
+                {formatCreatedAt(image.created_at) ? ` · ${formatCreatedAt(image.created_at)}` : ''}
               </p>
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <Button type="button" variant="outline" size="xs" onClick={() => void copy(image.url)}>
                 <Copy className="size-3.5" />
                 复制链接
+              </Button>
+              <Button type="button" variant="outline" size="xs" onClick={() => void copy(`![${image.filename}](${image.url})`, '已复制 Markdown')}>
+                <Copy className="size-3.5" />
+                Markdown
               </Button>
               {image.webp_url && image.webp_url !== image.url && (
                 <Button
@@ -194,10 +240,10 @@ export default function WorkspaceImageDetail({
                   查看原图
                 </a>
               </Button>
-              {!image.legacy && (
+              {(!image.legacy || (isAdmin && image.legacy_path)) && (
                 <Button type="button" variant="outline" size="xs" disabled={busy} onClick={() => void remove()}>
                   <Trash2 className="size-3.5" />
-                  删除原图
+                  {image.legacy ? '删除旧图' : '删除原图'}
                 </Button>
               )}
               {onClose && !embedded && (
@@ -210,19 +256,46 @@ export default function WorkspaceImageDetail({
 
           <div className={`space-y-5 ${embedded ? '' : 'px-5'}`}>
             <div className={image.legacy ? '' : 'grid gap-5 md:grid-cols-2'}>
-              <a
-                href={image.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="checker-well flex min-h-56 items-center justify-center overflow-hidden rounded-lg border p-3"
-              >
-                <FadeImage
-                  src={image.url}
-                  alt={image.filename}
-                  loading="eager"
-                  className="max-h-72 max-w-full rounded object-contain"
-                />
-              </a>
+              <div className="checker-well relative flex min-h-56 items-center justify-center overflow-hidden rounded-lg border p-3">
+                {onPrev && (
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="secondary"
+                    aria-label="上一张"
+                    onClick={onPrev}
+                    className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-background/85 shadow-sm backdrop-blur-xs hover:bg-background"
+                  >
+                    <ChevronLeft className="size-4" />
+                  </Button>
+                )}
+                {onNext && (
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="secondary"
+                    aria-label="下一张"
+                    onClick={onNext}
+                    className="absolute right-2.5 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-background/85 shadow-sm backdrop-blur-xs hover:bg-background"
+                  >
+                    <ChevronRight className="size-4" />
+                  </Button>
+                )}
+                <a
+                  href={image.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex max-w-full items-center justify-center"
+                >
+                  <FadeImage
+                    key={image.id}
+                    src={image.url}
+                    alt={image.filename}
+                    loading="eager"
+                    className="max-h-72 max-w-full rounded object-contain"
+                  />
+                </a>
+              </div>
 
               {!image.legacy && <form ref={formRef} onSubmit={saveVariant} className="space-y-3">
                 <p className="text-sm font-medium">实时转换与预生成</p>

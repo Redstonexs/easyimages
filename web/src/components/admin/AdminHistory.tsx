@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Copy, ExternalLink, ImageOff, Info, Loader2, Search, Trash2, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, Download, ExternalLink, ImageOff, Info, Loader2, Search, Trash2, X } from 'lucide-react'
 import type { GalleryBootstrap, GalleryFile } from '@/types'
 import type { NoticeType } from '@/shared/notify'
 import { adminApi } from '@/shared/adminApi'
@@ -46,7 +46,7 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
   const queryRef = useRef(queryInput)
   queryRef.current = queryInput
 
-  const load = useCallback(async (next: Partial<{ date: string; ext: string; q: string }> = {}) => {
+  const load = useCallback(async (next: Partial<{ date: string; ext: string; q: string; num: number }> = {}) => {
     inflightRef.current?.abort()
     const controller = new AbortController()
     inflightRef.current = controller
@@ -59,6 +59,7 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
     if (date && date !== current?.today) params.set('date', date)
     if (ext) params.set('ext', ext)
     if (q) params.set('q', q)
+    if (next.num && next.num > 0) params.set('num', String(next.num))
 
     const cacheKey = `admin:history:${params.toString()}`
     const cached = getCached<GalleryBootstrap>(cacheKey)
@@ -73,7 +74,7 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
       if (controller.signal.aborted) return
       setCached(cacheKey, payload)
       setGallery(payload)
-      setSelected(new Set())
+      setSelected(prev => (next.num ? prev : new Set()))
       if (queryRef.current === typedQuery) setQueryInput(payload.q || '')
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return
@@ -147,9 +148,17 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
       const result = await adminApi.deleteHistory(file.path)
       if (result.code === 200) {
         invalidateCached('admin:history:')
+        invalidateCached('admin:filer:')
         invalidateCached('admin:chart')
         invalidateCached('admin:overview')
-        setGallery(prev => (prev ? { ...prev, files: prev.files.filter(item => item.url !== file.url) } : prev))
+        invalidateCached('ws:images:')
+        invalidateCached('ws:folders:')
+        setGallery(prev => (prev ? {
+          ...prev,
+          total: Math.max(0, prev.total - 1),
+          files: prev.files.filter(item => item.url !== file.url)
+        } : prev))
+        if (selectedImage?.url === file.url) setSelectedImage(null)
         setSelected(prev => {
           const next = new Set(prev)
           next.delete(file.url)
@@ -181,10 +190,18 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
     const deleted = new Set(outcome.succeeded)
     if (deleted.size > 0) {
       invalidateCached('admin:history:')
+      invalidateCached('admin:filer:')
       invalidateCached('admin:chart')
       invalidateCached('admin:overview')
+      invalidateCached('ws:images:')
+      invalidateCached('ws:folders:')
     }
-    setGallery(prev => (prev ? { ...prev, files: prev.files.filter(item => !deleted.has(item.url)) } : prev))
+    setGallery(prev => (prev ? {
+      ...prev,
+      total: Math.max(0, prev.total - deleted.size),
+      files: prev.files.filter(item => !deleted.has(item.url))
+    } : prev))
+    if (selectedImage && deleted.has(selectedImage.url)) setSelectedImage(null)
     setSelected(prev => new Set([...prev].filter(url => !deleted.has(url))))
     const summary = summarizeBatchDelete(outcome)
     onNotice(summary.message, summary.type)
@@ -308,10 +325,15 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
 
       {files.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 px-3.5 py-2.5">
-          <label className="flex items-center gap-2 text-sm font-medium cursor-pointer select-none">
-            <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
-            <span>全选当前（{files.length}）</span>
-          </label>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-sm font-medium cursor-pointer select-none">
+              <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
+              <span>全选当前（{files.length}）</span>
+            </label>
+            <Badge variant="outline" className="font-mono text-[11px] font-normal tabular-nums">
+              显示 {files.length} / {gallery.total} 张
+            </Badge>
+          </div>
           {selectedFiles.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline" className="font-mono tabular-nums">
@@ -411,6 +433,21 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
         </Card>
       )}
 
+      {gallery.total > files.length && (
+        <div className="text-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            onClick={() => void load({ num: Math.min(500, files.length + Math.max(gallery.limit || 20, 40)) })}
+          >
+            {loading && <Loader2 className="size-3.5 animate-spin" />}
+            加载更多（还有 {gallery.total - files.length} 张）
+          </Button>
+        </div>
+      )}
+
       <Dialog open={Boolean(selectedImage)} onOpenChange={open => { if (!open) setSelectedImage(null) }}>
         <DialogContent className="sm:max-w-4xl p-4">
           {selectedImage && (
@@ -477,6 +514,18 @@ export default function AdminHistory({ onNotice }: { onNotice: (message: string,
                   <Button type="button" size="sm" onClick={() => void copy(selectedImage.url)}>
                     <Copy className="size-3.5" />
                     复制链接
+                  </Button>
+                  {selectedImage.webp_url && (
+                    <Button type="button" size="sm" variant="outline" onClick={() => void copy(selectedImage.webp_url!, '已复制 WebP 链接')}>
+                      <Copy className="size-3.5" />
+                      复制 WebP
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={selectedImage.down_url}>
+                      <Download className="size-3.5" />
+                      下载
+                    </a>
                   </Button>
                   <Button variant="outline" size="sm" asChild>
                     <a href={selectedImage.url} target="_blank" rel="noopener noreferrer">

@@ -24,10 +24,12 @@ export interface WorkspaceAsset {
   size_bytes: number
   width?: number
   height?: number
+  created_at?: string
   image_id?: string
   url: string
   webp_url?: string
   legacy?: boolean
+  legacy_path?: string
 }
 
 export interface WorkspaceTransform {

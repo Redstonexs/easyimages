@@ -46,6 +46,7 @@ export interface UploadResult {
   message?: string
   url?: string
   thumb?: string
+  webp_url?: string
   srcName?: string
   original_name?: string
   del?: string
@@ -98,7 +99,7 @@ export interface AdminBootstrap {
   workspace_api_base: string
 }
 
-export type AdminView = 'manager' | 'chart' | 'history' | 'filer' | 'workspace'
+export type AdminView = 'manager' | 'chart' | 'history' | 'workspace'
 
 export interface AdminConfig {
   title: string
@@ -124,7 +125,9 @@ export interface AdminConfig {
   captcha: number
   captcha_type: number
   turnstile_site_key: string
+  turnstile_secret_key?: string
   recaptcha_site_key: string
+  recaptcha_secret_key?: string
   cap_instance_url: string
   cap_site_key: string
   cap_widget_url: string

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   BarChart3,
-  FolderKanban,
   FolderOpen,
   History,
   Home,
@@ -20,16 +19,14 @@ import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import AdminChart from '@/components/admin/AdminChart'
 import AdminConfig from '@/components/admin/AdminConfig'
-import AdminFiler from '@/components/admin/AdminFiler'
 import AdminHistory from '@/components/admin/AdminHistory'
 import WorkspaceLibrary from '@/components/admin/WorkspaceLibrary'
 
 const NAV_ITEMS: Array<{ view: AdminView; label: string; description: string; href: string; icon: typeof Settings }> = [
   { view: 'manager', label: '系统配置', description: '站点、上传、水印、安全与存储源参数', href: '/admin/manager', icon: Settings },
-  { view: 'workspace', label: '图片库', description: '目录管理、实时转换、多租户配额与旧图浏览', href: '/admin/workspace', icon: FolderOpen },
+  { view: 'workspace', label: '图片库', description: '目录管理、本地文件浏览、实时转换与多租户配额', href: '/admin/workspace', icon: FolderOpen },
   { view: 'history', label: '历史上传', description: '按日期与格式检索历史上传并批量管理', href: '/admin/history', icon: History },
-  { view: 'chart', label: '数据统计', description: '近 30 天上传趋势与存储格式分布', href: '/admin/chart', icon: BarChart3 },
-  { view: 'filer', label: '文件管理', description: '按本地目录树浏览、复制与清理文件', href: '/admin/filer', icon: FolderKanban }
+  { view: 'chart', label: '数据统计', description: '近 30 天上传趋势与存储格式分布', href: '/admin/chart', icon: BarChart3 }
 ]
 
 function prefetchAdminView(view: AdminView, isAdmin: boolean) {
@@ -43,15 +40,13 @@ function prefetchAdminView(view: AdminView, isAdmin: boolean) {
     case 'history':
       prefetchCached('admin:history:', () => adminApi.history(new URLSearchParams()))
       break
-    case 'filer':
-      prefetchCached('admin:filer:', () => adminApi.filer(new URLSearchParams()))
-      break
     case 'workspace':
       prefetchCached('ws:me', () => workspaceApi.me())
       if (isAdmin) {
         prefetchCached('ws:users', () => workspaceApi.users())
         prefetchCached('ws:folders:admin', () => workspaceApi.folders('admin'))
         prefetchCached('ws:images:admin:__all__', () => workspaceApi.images('admin', null, ''))
+        prefetchCached('admin:filer:', () => adminApi.filer(new URLSearchParams()))
       }
       break
   }
@@ -183,7 +178,7 @@ export default function AdminApp({ bootstrap }: { bootstrap: AdminBootstrap }) {
             <div>
               <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
               <p className="mt-1 text-xs text-muted-foreground">
-                {activeNav?.description || bootstrap.title}
+                {bootstrap.is_admin ? (activeNav?.description || bootstrap.title) : '目录管理、原图上传与实时图片转换'}
               </p>
             </div>
             {configDirty && currentView === 'manager' && (
@@ -200,7 +195,6 @@ export default function AdminApp({ bootstrap }: { bootstrap: AdminBootstrap }) {
             )}
             {currentView === 'history' && <AdminHistory onNotice={notifyToast} />}
             {currentView === 'chart' && <AdminChart onNotice={notifyToast} />}
-            {currentView === 'filer' && <AdminFiler onNotice={notifyToast} />}
             {currentView === 'workspace' && (
               <WorkspaceLibrary
                 isAdmin={bootstrap.is_admin}

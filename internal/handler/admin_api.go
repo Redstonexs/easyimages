@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -50,7 +51,9 @@ type adminConfigPayload struct {
 	Captcha              int                         `json:"captcha"`
 	CaptchaType          int                         `json:"captcha_type"`
 	TurnstileSiteKey     string                      `json:"turnstile_site_key"`
+	TurnstileSecretKey   string                      `json:"turnstile_secret_key,omitempty"`
 	RecaptchaSiteKey     string                      `json:"recaptcha_site_key"`
+	RecaptchaSecretKey   string                      `json:"recaptcha_secret_key,omitempty"`
 	CapInstanceURL       string                      `json:"cap_instance_url"`
 	CapSiteKey           string                      `json:"cap_site_key"`
 	CapWidgetURL         string                      `json:"cap_widget_url"`
@@ -290,7 +293,7 @@ func AdminHistoryDeleteAPI(cfg *config.Config) gin.HandlerFunc {
 
 		switch mode {
 		case "delete":
-			if err := service.DeleteFile(req.URL); err != nil {
+			if err := service.DeleteFileWithConfig(req.URL, cfg); err != nil {
 				c.JSON(http.StatusOK, gin.H{"code": 404, "msg": "删除失败", "type": "danger", "icon": "exclamation-sign"})
 				return
 			}
@@ -375,12 +378,12 @@ func applyAdminConfigPayload(cfg *config.Config, req adminConfigPayload) {
 	if req.SiteIcon != "" {
 		cfg.SiteIcon = req.SiteIcon
 	}
-	if req.Domain != "" {
-		cfg.Domain = req.Domain
-		cfg.ImageURL = req.Domain
+	if trimmed := strings.TrimRight(strings.TrimSpace(req.Domain), "/"); trimmed != "" {
+		cfg.Domain = trimmed
+		cfg.ImageURL = trimmed
 	}
-	if req.ImageURL != "" {
-		cfg.ImageURL = req.ImageURL
+	if trimmed := strings.TrimRight(strings.TrimSpace(req.ImageURL), "/"); trimmed != "" {
+		cfg.ImageURL = trimmed
 	}
 	if req.MaxSize > 0 {
 		cfg.MaxSize = req.MaxSize
@@ -389,7 +392,7 @@ func applyAdminConfigPayload(cfg *config.Config, req adminConfigPayload) {
 		cfg.Extensions = req.Extensions
 	}
 	if req.CompressRatio > 0 {
-		cfg.CompressRatio = req.CompressRatio
+		cfg.CompressRatio = min(100, req.CompressRatio)
 	}
 	if req.ThumbnailW > 0 {
 		cfg.ThumbnailW = req.ThumbnailW
@@ -398,28 +401,24 @@ func applyAdminConfigPayload(cfg *config.Config, req adminConfigPayload) {
 		cfg.ThumbnailH = req.ThumbnailH
 	}
 	if req.WebpQuality > 0 {
-		cfg.WebpQuality = req.WebpQuality
+		cfg.WebpQuality = min(100, req.WebpQuality)
 	}
-	if req.WaterText != "" {
-		cfg.WaterText = req.WaterText
-	}
+	cfg.WaterText = strings.TrimSpace(req.WaterText)
 	if req.TextColor != "" {
-		cfg.TextColor = req.TextColor
+		cfg.TextColor = strings.TrimSpace(req.TextColor)
 	}
 	if req.TextSize > 0 {
 		cfg.TextSize = req.TextSize
 	}
-	if req.TextFont != "" {
-		cfg.TextFont = req.TextFont
+	cfg.TextFont = strings.TrimSpace(req.TextFont)
+	cfg.WaterImg = strings.TrimSpace(req.WaterImg)
+	cfg.TurnstileSiteKey = strings.TrimSpace(req.TurnstileSiteKey)
+	if secret := strings.TrimSpace(req.TurnstileSecretKey); secret != "" {
+		cfg.TurnstileSecretKey = secret
 	}
-	if req.WaterImg != "" {
-		cfg.WaterImg = req.WaterImg
-	}
-	if req.TurnstileSiteKey != "" {
-		cfg.TurnstileSiteKey = req.TurnstileSiteKey
-	}
-	if req.RecaptchaSiteKey != "" {
-		cfg.RecaptchaSiteKey = req.RecaptchaSiteKey
+	cfg.RecaptchaSiteKey = strings.TrimSpace(req.RecaptchaSiteKey)
+	if secret := strings.TrimSpace(req.RecaptchaSecretKey); secret != "" {
+		cfg.RecaptchaSecretKey = secret
 	}
 	// Instance URL, widget URL and site key round-trip to the admin form, so an
 	// empty value is a deliberate clear. The secret key is write-only — it is never
@@ -450,7 +449,11 @@ func applyAdminConfigPayload(cfg *config.Config, req adminConfigPayload) {
 	cfg.Thumbnail = req.Thumbnail
 	cfg.WebpConvert = req.WebpConvert
 	cfg.Watermark = req.Watermark
-	cfg.WaterPosition = req.WaterPosition
+	if req.WaterPosition >= 1 && req.WaterPosition <= 9 {
+		cfg.WaterPosition = req.WaterPosition
+	} else if cfg.WaterPosition < 1 || cfg.WaterPosition > 9 {
+		cfg.WaterPosition = 9
+	}
 	cfg.Captcha = req.Captcha
 	cfg.CaptchaType = req.CaptchaType
 	cfg.HotlinkProtect = req.HotlinkProtect
@@ -688,11 +691,12 @@ func adminFileEntries(basePath string, names []string, cfg *config.Config) []adm
 			sizeHuman = service.FormatSize(size)
 			modifiedAt = info.ModTime().Format("2006-01-02 15:04")
 		}
+		escapedRel := (&url.URL{Path: relativePath}).EscapedPath()
 		files = append(files, adminFileEntry{
 			Name:         name,
 			OriginalName: metadata.OriginalName,
 			Path:         relativePath,
-			URL:          imageURLForMetadata(cfg, relativePath, metadata),
+			URL:          imageURLForMetadata(cfg, escapedRel, metadata),
 			ThumbURL:     thumbURLForMetadata(relativePath, metadata),
 			WebPURL:      service.GetWebPURL(relativePath, cfg),
 			Ext:          ext,
